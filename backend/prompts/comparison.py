@@ -5,11 +5,10 @@ as Added/Removed/Modified with materiality (cosmetic vs. substantive)
 and stated justification.
 """
 
-import anthropic
 import logging
-from backend.config import settings
 from backend.models.schemas import Clause, ComparisonItem, ComparisonResult
 from backend.security.prompt_guard import wrap_document_content, get_data_boundary_instruction
+from backend.prompts.gemini_client import call_gemini_structured
 
 logger = logging.getLogger(__name__)
 
@@ -33,12 +32,7 @@ async def compare_documents(
     wrapped_text, nonce = wrap_document_content(combined)
     boundary_instruction = get_data_boundary_instruction(nonce)
     
-    client = anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY)
-    
-    response = client.messages.create(
-        model=settings.CLAUDE_MODEL,
-        max_tokens=4096,
-        system=f"""You are a legal document comparison system. Compare clauses between two versions of a document.
+    system_prompt = f"""You are a legal document comparison system. Compare clauses between two versions of a document.
 
 {boundary_instruction}
 
@@ -53,20 +47,16 @@ Rules:
 1. Match clauses by their section/topic, not by position.
 2. Only report actual differences, not identical clauses.
 3. Materiality MUST include a stated justification.
-4. Be precise about what changed and why it matters.""",
-        tools=[{
-            "name": "compare",
-            "description": "Output document comparison results.",
-            "input_schema": ComparisonResult.model_json_schema()
-        }],
-        tool_choice={"type": "tool", "name": "compare"},
-        messages=[{"role": "user", "content": f"Compare these two documents:\n{wrapped_text}"}]
-    )
-    
-    for block in response.content:
-        if block.type == "tool_use":
-            result = ComparisonResult(**block.input)
-            logger.info(f"Comparison found {len(result.items)} differences")
-            return result
-    
-    return ComparisonResult(items=[])
+4. Be precise about what changed and why it matters."""
+
+    try:
+        result = call_gemini_structured(
+            system_instruction=system_prompt,
+            user_content=f"Compare these two documents:\n{wrapped_text}",
+            response_schema=ComparisonResult,
+        )
+        logger.info(f"Comparison found {len(result.items)} differences")
+        return result
+    except Exception as e:
+        logger.error(f"Error comparing documents with Gemini: {e}")
+        return ComparisonResult(items=[])

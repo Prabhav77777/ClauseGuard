@@ -3,8 +3,8 @@ fastapi==0.115.12
 uvicorn[standard]==0.34.3
 python-multipart==0.0.20
 
-# AI
-anthropic==0.52.0
+# AI — Google Gemini SDK
+google-genai==2.12.1
 
 # Document parsing
 PyMuPDF==1.25.5

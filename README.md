@@ -82,8 +82,8 @@ ClauseGuard operates on a 7-stage sequential pipeline:
                                                 │                                   │
                                                 ▼                                   │
                              ┌──────────────────────────────────────┐               │
-                             │           Anthropic Claude           │               │
-                             │    (Forced Tool Use / Structured)    │               │
+                             │          Google Gemini API           │               │
+                             │    (Structured JSON / google-genai)  │               │
                              └──────────────────────────────────────┘               │
                                                                                     │
                                                                                     ▼
@@ -102,6 +102,7 @@ ClauseGuard operates on a 7-stage sequential pipeline:
 - `backend/services/retriever.py`: In-memory TF-IDF vectorizer + cosine similarity for top-k clause retrieval.
 - `backend/services/legal_analyzer.py`: Orchestrates evidence-grounded Q&A and scenario analysis with the validation guard pipeline.
 - `backend/services/brief_generator.py`: Compiles session questions and unclear items into an exportable Markdown lawyer brief.
+- `backend/prompts/gemini_client.py`: Shared Gemini API client helper generating structured JSON validated against Pydantic schemas.
 - `backend/prompts/`: 7 narrow, single-purpose prompt modules (`extraction.py`, `categorization.py`, `explanation.py`, `qa.py`, `scenario.py`, `comparison.py`, `validation.py`).
 
 ---
@@ -193,7 +194,7 @@ pip install -r requirements.txt
 
 # Copy environment variables template
 cp .env.example .env
-# Edit .env and set your ANTHROPIC_API_KEY=your_key_here
+# Edit .env and set your GEMINI_API_KEY=your_key_here (or GOOGLE_API_KEY)
 
 # Start FastAPI server
 uvicorn backend.main:app --reload --port 8000

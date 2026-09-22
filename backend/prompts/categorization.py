@@ -2,18 +2,14 @@
 
 Assigns each clause to a category from the fixed taxonomy. Processes
 all clauses in a single batch to minimize API calls.
-
-Efficiency: All clauses are sent in one LLM call since we only need
-category labels (small output), not full analysis.
 """
 
-import anthropic
 import logging
-from backend.config import settings
 from backend.models.schemas import (
     Clause, ClauseCategory, CategorizationResult, BatchCategorizationResult
 )
 from backend.security.prompt_guard import wrap_document_content, get_data_boundary_instruction
+from backend.prompts.gemini_client import call_gemini_structured
 
 logger = logging.getLogger(__name__)
 
@@ -21,13 +17,12 @@ logger = logging.getLogger(__name__)
 async def categorize_clauses(clauses: list[Clause]) -> list[CategorizationResult]:
     """Assign categories to all clauses from the fixed taxonomy.
     
-    Sends all clauses in a single LLM call for efficiency.
+    Sends all clauses in a single Gemini API call for efficiency.
     Categories must be from the ClauseCategory enum only.
     """
     if not clauses:
         return []
     
-    # Format clauses for the LLM
     clauses_text = ""
     for clause in clauses:
         clauses_text += f"\nID: {clause.id}\nSection: {clause.section}\nText: {clause.text}\n---\n"
@@ -37,12 +32,7 @@ async def categorize_clauses(clauses: list[Clause]) -> list[CategorizationResult
     
     categories_list = ", ".join([c.value for c in ClauseCategory])
     
-    client = anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY)
-    
-    response = client.messages.create(
-        model=settings.CLAUDE_MODEL,
-        max_tokens=2048,
-        system=f"""You are a legal clause categorization system.
+    system_prompt = f"""You are a legal clause categorization system.
 
 {boundary_instruction}
 
@@ -52,24 +42,19 @@ Rules:
 1. You MUST select from the provided category list only.
 2. If a clause doesn't fit well, use 'general'.
 3. Categorize based on the primary purpose of the clause.
-4. Return a categorization for EVERY clause provided.""",
-        tools=[{
-            "name": "categorize",
-            "description": "Output clause categorizations.",
-            "input_schema": BatchCategorizationResult.model_json_schema()
-        }],
-        tool_choice={"type": "tool", "name": "categorize"},
-        messages=[{"role": "user", "content": f"Categorize each of these clauses:\n{wrapped_text}"}]
-    )
-    
-    for block in response.content:
-        if block.type == "tool_use":
-            result = BatchCategorizationResult(**block.input)
-            logger.info(f"Categorized {len(result.categorizations)} clauses")
-            return result.categorizations
-    
-    # Fallback: assign 'general' to all if LLM fails
-    return [
-        CategorizationResult(clause_id=c.id, category=ClauseCategory.GENERAL)
-        for c in clauses
-    ]
+4. Return a categorization for EVERY clause provided."""
+
+    try:
+        result = call_gemini_structured(
+            system_instruction=system_prompt,
+            user_content=f"Categorize each of these clauses:\n{wrapped_text}",
+            response_schema=BatchCategorizationResult,
+        )
+        logger.info(f"Categorized {len(result.categorizations)} clauses")
+        return result.categorizations
+    except Exception as e:
+        logger.error(f"Error categorizing clauses: {e}")
+        return [
+            CategorizationResult(clause_id=c.id, category=ClauseCategory.GENERAL)
+            for c in clauses
+        ]

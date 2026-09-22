@@ -3,14 +3,9 @@
 This module implements two validation steps:
 1. Uncertainty validation: Binary check on whether an answer is supported by sources
 2. Final response validation: Comprehensive guard that downgrades unsupported claims
-
-This is a GENUINE guard, not a no-op. It actively checks and corrects responses.
 """
 
-import anthropic
-import json
 import logging
-from backend.config import settings
 from backend.models.schemas import (
     Clause, QAResponse, ScenarioResponse, ValidationResult,
     FinalValidationResult, CertaintyLevel
@@ -19,6 +14,7 @@ from backend.security.prompt_guard import (
     wrap_document_content, get_data_boundary_instruction,
     strip_system_prompt_leaks, validate_clause_ids_exist
 )
+from backend.prompts.gemini_client import call_gemini_structured
 
 logger = logging.getLogger(__name__)
 
@@ -26,11 +22,7 @@ logger = logging.getLogger(__name__)
 async def validate_uncertainty(
     answer_text: str, source_clauses: list[Clause]
 ) -> ValidationResult:
-    """Binary check: is the answer supported by the provided source clauses?
-    
-    This is the first validation gate. If the answer references facts
-    not present in the source clauses, it flags them.
-    """
+    """Binary check: is the answer supported by the provided source clauses?"""
     if not source_clauses:
         return ValidationResult(
             is_supported=False,
@@ -43,35 +35,23 @@ async def validate_uncertainty(
     wrapped_clauses, nonce = wrap_document_content(clauses_text)
     boundary_instruction = get_data_boundary_instruction(nonce)
     
-    client = anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY)
-    
-    response = client.messages.create(
-        model=settings.CLAUDE_MODEL,
-        max_tokens=512,
-        system=f"""You are a fact-checking system. Your job is to verify whether an answer is supported by source clauses.
+    system_prompt = f"""You are a fact-checking system. Your job is to verify whether an answer is supported by source clauses.
 
 {boundary_instruction}
 
 Check if the answer makes claims that are NOT supported by the provided clause texts.
 Set is_supported to true ONLY if every factual claim in the answer can be traced to the source clauses.
-Set is_supported to false if the answer contains fabricated information, unsupported claims, or references to clauses not provided.""",
-        tools=[{
-            "name": "validate",
-            "description": "Output validation result.",
-            "input_schema": ValidationResult.model_json_schema()
-        }],
-        tool_choice={"type": "tool", "name": "validate"},
-        messages=[{
-            "role": "user",
-            "content": f"Answer to validate:\n{answer_text}\n\nSource clauses:\n{wrapped_clauses}"
-        }]
-    )
-    
-    for block in response.content:
-        if block.type == "tool_use":
-            return ValidationResult(**block.input)
-    
-    return ValidationResult(is_supported=False, notes="Validation could not be completed.")
+Set is_supported to false if the answer contains fabricated information, unsupported claims, or references to clauses not provided."""
+
+    try:
+        return call_gemini_structured(
+            system_instruction=system_prompt,
+            user_content=f"Answer to validate:\n{answer_text}\n\nSource clauses:\n{wrapped_clauses}",
+            response_schema=ValidationResult,
+        )
+    except Exception as e:
+        logger.error(f"Error running uncertainty validation: {e}")
+        return ValidationResult(is_supported=False, notes="Validation could not be completed.")
 
 
 def validate_final_response(
@@ -84,8 +64,6 @@ def validate_final_response(
     1. Clause ID existence check — removes references to non-existent clauses
     2. System prompt leak detection — strips leaked prompt content
     3. Unsupported claim downgrade — changes certainty to NOT_ESTABLISHED
-    
-    Unsupported claims are DOWNGRADED to 'not established', never silently deleted.
     """
     valid_ids = {c.id for c in all_clauses}
     corrections_made = False

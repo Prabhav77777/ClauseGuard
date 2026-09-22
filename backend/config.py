@@ -5,6 +5,7 @@ No secrets are ever hardcoded. The API key is validated at startup when needed,
 not during module import, to allow tests to run without a key.
 """
 
+import os
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -14,9 +15,8 @@ class Settings(BaseSettings):
     Loaded from environment variables or .env file.
     See .env.example for documentation of each setting.
     """
-    # API key is optional at import time to allow tests to run without it.
-    # It is validated at runtime before any LLM call.
-    ANTHROPIC_API_KEY: str = ""
+    # Gemini API key (supports GEMINI_API_KEY or GOOGLE_API_KEY env vars)
+    GEMINI_API_KEY: str = ""
     
     # Document limits
     MAX_FILE_SIZE_MB: int = 10
@@ -30,8 +30,8 @@ class Settings(BaseSettings):
     # Session management
     SESSION_TTL_SECONDS: int = 3600
     
-    # Claude model selection
-    CLAUDE_MODEL: str = "claude-sonnet-4-20250514"
+    # Gemini model selection
+    GEMINI_MODEL: str = "gemini-2.5-flash"
     
     # Logging — only metadata, never document content
     LOG_LEVEL: str = "INFO"
@@ -50,12 +50,18 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        # Fallback to GOOGLE_API_KEY if GEMINI_API_KEY is not set
+        if not self.GEMINI_API_KEY:
+            self.GEMINI_API_KEY = os.environ.get("GOOGLE_API_KEY", "")
+
     def __repr__(self) -> str:
-        masked_key = "***" if self.ANTHROPIC_API_KEY else ""
+        masked_key = "***" if self.GEMINI_API_KEY else ""
         return (
-            f"Settings(CLAUDE_MODEL='{self.CLAUDE_MODEL}', "
+            f"Settings(GEMINI_MODEL='{self.GEMINI_MODEL}', "
             f"MAX_FILE_SIZE_MB={self.MAX_FILE_SIZE_MB}, "
-            f"ANTHROPIC_API_KEY='{masked_key}')"
+            f"GEMINI_API_KEY='{masked_key}')"
         )
 
     def __str__(self) -> str:

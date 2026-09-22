@@ -2,25 +2,18 @@
 
 Reasons about hypothetical scenarios (e.g., 'What happens if I resign after 4 months?')
 by pulling and reasoning across multiple relevant clauses from different categories.
-
-Implications are always labeled as interpretation, never as legal conclusions.
 """
 
-import anthropic
 import logging
-from backend.config import settings
 from backend.models.schemas import Clause, ScenarioResponse
 from backend.security.prompt_guard import wrap_document_content, get_data_boundary_instruction
+from backend.prompts.gemini_client import call_gemini_structured
 
 logger = logging.getLogger(__name__)
 
 
 async def analyze_scenario(scenario: str, retrieved_clauses: list[Clause]) -> ScenarioResponse:
-    """Analyze a hypothetical scenario against relevant clauses.
-    
-    Retrieves clauses across multiple categories to reason about
-    cross-cutting implications of a scenario.
-    """
+    """Analyze a hypothetical scenario against relevant clauses."""
     if not retrieved_clauses:
         return ScenarioResponse(
             relevant_clauses=[],
@@ -40,12 +33,7 @@ async def analyze_scenario(scenario: str, retrieved_clauses: list[Clause]) -> Sc
     boundary_instruction = get_data_boundary_instruction(nonce)
     available_ids = ", ".join(clause_ids)
     
-    client = anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY)
-    
-    response = client.messages.create(
-        model=settings.CLAUDE_MODEL,
-        max_tokens=2048,
-        system=f"""You are ClauseGuard, a legal document analysis assistant. Analyze hypothetical scenarios against relevant contract clauses.
+    system_prompt = f"""You are ClauseGuard, a legal document analysis assistant. Analyze hypothetical scenarios against relevant contract clauses.
 
 {boundary_instruction}
 
@@ -62,26 +50,22 @@ Rules:
 2. Implications must be labeled as interpretation, NEVER as legal conclusions
 3. Never fabricate clauses, dates, penalties, or obligations
 4. Consider how multiple clauses might interact with each other
-5. If the scenario involves timing, look for probation periods, notice periods, and effective dates""",
-        tools=[{
-            "name": "analyze_scenario",
-            "description": "Output scenario analysis.",
-            "input_schema": ScenarioResponse.model_json_schema()
-        }],
-        tool_choice={"type": "tool", "name": "analyze_scenario"},
-        messages=[{"role": "user", "content": f"Scenario: {scenario}\n\nRelevant clauses from the document:\n{wrapped_text}"}]
-    )
-    
-    for block in response.content:
-        if block.type == "tool_use":
-            result = ScenarioResponse(**block.input)
-            logger.info(f"Scenario analysis with {len(result.relevant_clauses)} relevant clauses")
-            return result
-    
-    return ScenarioResponse(
-        relevant_clauses=[],
-        what_document_says="Unable to analyze this scenario.",
-        potential_implication="",
-        unclear="The analysis could not be completed.",
-        lawyer_question="Please consult your lawyer about this scenario."
-    )
+5. If the scenario involves timing, look for probation periods, notice periods, and effective dates"""
+
+    try:
+        result = call_gemini_structured(
+            system_instruction=system_prompt,
+            user_content=f"Scenario: {scenario}\n\nRelevant clauses from the document:\n{wrapped_text}",
+            response_schema=ScenarioResponse,
+        )
+        logger.info(f"Scenario analysis with {len(result.relevant_clauses)} relevant clauses")
+        return result
+    except Exception as e:
+        logger.error(f"Error analyzing scenario with Gemini: {e}")
+        return ScenarioResponse(
+            relevant_clauses=[],
+            what_document_says="Unable to analyze this scenario.",
+            potential_implication="",
+            unclear="The analysis could not be completed.",
+            lawyer_question="Please consult your lawyer about this scenario."
+        )
