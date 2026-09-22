@@ -1,4 +1,5 @@
 import { useState, useRef } from 'react'
+import { API_BASE } from '../apiConfig'
 
 /**
  * FileUpload — Drag-and-drop file upload with validation feedback.
@@ -47,7 +48,7 @@ export default function FileUpload({ onSuccess, onError }) {
       const formData = new FormData()
       formData.append('file', file)
 
-      const res = await fetch('/api/documents/upload', {
+      const res = await fetch(`${API_BASE}/api/documents/upload`, {
         method: 'POST',
         body: formData,
       })

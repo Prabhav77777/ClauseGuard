@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import './index.css'
+import { API_BASE } from './apiConfig'
 import FileUpload from './components/FileUpload'
 import ClauseMap from './components/ClauseMap'
 import ChatPanel from './components/ChatPanel'
@@ -38,7 +39,7 @@ function App() {
   const handleDownloadBrief = async () => {
     if (!sessionId) return
     try {
-      const res = await fetch(`/api/documents/${sessionId}/brief`)
+      const res = await fetch(`${API_BASE}/api/documents/${sessionId}/brief`)
       if (!res.ok) throw new Error('Failed to generate brief')
       const text = await res.text()
       const blob = new Blob([text], { type: 'text/markdown' })

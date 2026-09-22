@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from 'react'
+import { API_BASE } from '../apiConfig'
 
 /**
  * ChatPanel — Evidence-grounded Q&A chat interface.
@@ -40,7 +41,7 @@ export default function ChatPanel({ sessionId, clauses }) {
     setIsLoading(true)
 
     try {
-      const res = await fetch(`/api/chat/${sessionId}/ask`, {
+      const res = await fetch(`${API_BASE}/api/chat/${sessionId}/ask`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ question }),
