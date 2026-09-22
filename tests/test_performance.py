@@ -258,18 +258,18 @@ class TestPerformanceOptimizations:
 
     def test_session_expiry_integration(self, sample_pdf_bytes, monkeypatch):
         """Verify real uploaded DocumentSession objects expire past SESSION_TTL_SECONDS while active sessions remain."""
-        import heapq
-
         from fastapi.testclient import TestClient
 
         from backend.api.documents import _DOCUMENT_CONTENT_CACHE
         from backend.config import settings
-        from backend.main import app, push_session_expiry, sessions, sessions_heap
+        from backend.main import app, run_cleanup_pass, sessions, sessions_heap
         from backend.models.schemas import ClassificationResult, Clause, DocumentType
 
         _DOCUMENT_CONTENT_CACHE.clear()
         sessions.clear()
         sessions_heap.clear()
+        app.state.sessions = sessions
+        app.state.retrievers = {}
 
         client = TestClient(app)
 
@@ -281,6 +281,8 @@ class TestPerformanceOptimizations:
             )
 
         monkeypatch.setattr("backend.api.documents.process_document", mock_process_document)
+
+        now0 = time.time()
 
         # Upload session 1 (to be expired)
         res1 = client.post("/api/documents/upload", files={"file": ("doc1.pdf", sample_pdf_bytes, "application/pdf")})
@@ -295,30 +297,25 @@ class TestPerformanceOptimizations:
         assert sid1 in app.state.sessions
         assert sid2 in app.state.sessions
 
-        # Advance sid1 last_accessed past SESSION_TTL_SECONDS
-        old_time = time.time() - (settings.SESSION_TTL_SECONDS + 100)
-        app.state.sessions[sid1].last_accessed = old_time
-        push_session_expiry(sid1, old_time)
+        # Keep sid1 last_accessed at now0, but refresh sid2 last_accessed to now0 + 200
+        app.state.sessions[sid1].last_accessed = now0
+        app.state.sessions[sid2].last_accessed = now0 + 200
 
-        # Run single cleanup pass
-        now = time.time()
-        expired_count = 0
-        while sessions_heap and sessions_heap[0][0] <= now:
-            expiry, sid = heapq.heappop(sessions_heap)
-            session = sessions.get(sid)
-            if session is None:
-                continue
-            if session.last_accessed + settings.SESSION_TTL_SECONDS <= now:
-                del sessions[sid]
-                if hasattr(app.state, "retrievers") and sid in app.state.retrievers:
-                    del app.state.retrievers[sid]
-                expired_count += 1
-            else:
-                heapq.heappush(sessions_heap, (session.last_accessed + settings.SESSION_TTL_SECONDS, sid))
+        # Pass 1: Run cleanup pass at target time t = now0 + SESSION_TTL_SECONDS + 10
+        # sid1 (expiry now0 + TTL) should expire; sid2 (initial heap expiry now0 + TTL + 5) will not be popped yet or will be re-pushed
+        simulated_now = now0 + settings.SESSION_TTL_SECONDS + 10
+        expired_count = run_cleanup_pass(now=simulated_now)
 
         assert expired_count == 1
         assert sid1 not in app.state.sessions
         assert sid2 in app.state.sessions
+
+        # Pass 2: Run cleanup pass at target time t = now0 + 200 + SESSION_TTL_SECONDS + 10
+        simulated_now_2 = now0 + 200 + settings.SESSION_TTL_SECONDS + 10
+        expired_count_2 = run_cleanup_pass(now=simulated_now_2)
+
+        assert expired_count_2 == 1
+        assert sid2 not in app.state.sessions
 
     def test_content_hash_cache_lru_eviction(self):
         """Verify _DOCUMENT_CONTENT_CACHE enforces LRUCache cap of 50 entries and evicts oldest."""

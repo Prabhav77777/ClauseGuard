@@ -1,9 +1,11 @@
 ## PR REVIEW NOTES
 
 ### Second-Pass Architecture & Code Review Findings
-- **Session Expiry & Heap Cleanup**: Addressed session expiry bug by adding `last_accessed` timestamp tracking to `DocumentSession` model schema, enabling automated session cleanup in `backend/main.py` via `push_session_expiry` and min-heap tracking.
+- **Deterministic Session Expiry Testability**: Extracted `run_cleanup_pass(now: float | None = None)` as a standalone function in `backend/main.py`. This isolates the min-heap pop loop and TTL timestamp checks so integration tests can pass explicit target timestamps (`simulated_now`) deterministically without relying on `asyncio.sleep` or real wall-clock delays.
+- **Session Scope Audit on `compare.py`**: Audited `backend/api/compare.py` and confirmed that document comparison processes raw upload files directly on the fly per request. It does NOT reference or create session state in `app.state.sessions`, so session timestamp updating (`last_accessed`) is not required for comparison operations.
+- **Lifespan State Binding in API Integration Tests**: Identified that instantiated `TestClient(app)` calls without context manager startup do not invoke FastAPI `lifespan` handlers, leaving `app.state.sessions` unbound to `main.sessions`. Updated `test_session_expiry_integration` in `tests/test_performance.py` to explicitly bind state references, ensuring tests execute against identical memory structures as production.
+- **500 Error Handler Alignment**: Verified that route-level 500 exceptions in `backend/api/documents.py` explicitly return document-processing context for upload clients, whereas `main.py` provides a generic global exception handler for unhandled framework/routing errors.
 - **Content Hash Caching & Bound Safety**: Implemented thread-safe `cachetools.LRUCache(maxsize=50)` wrapped with `asyncio.Lock()` for `_DOCUMENT_CONTENT_CACHE` in `backend/api/documents.py` to prevent memory leaks during high-volume document uploads.
-- **500 Error Handler Alignment**: Documented `#Business-Intent` reasoning for route-level exception handling vs global 500 error sanitization middleware.
 - **Taxonomy & Codebase Tagging**: Fully tagged all 30 backend Python modules with block-level taxonomy tags (`MODULE:`, `@level-one-validation:`, `#Scope-Of-Improvement:`, `@risk-area:`, `#Uncertain:`, `#What:`, `#Business-Intent:`).
 
 ### Consolidated Risk Areas (`@risk-area`)

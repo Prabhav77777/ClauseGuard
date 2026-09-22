@@ -48,34 +48,41 @@ def push_session_expiry(session_id: str, last_accessed: float | None = None):
     heapq.heappush(sessions_heap, (expiry, session_id))
 
 
+# #What: Performs a single session cleanup pass using min-heap inspection
+def run_cleanup_pass(now: float | None = None) -> int:
+    """Run a single cleanup pass over sessions_heap using the provided timestamp (defaults to current time)."""
+    if now is None:
+        now = time.time()
+    expired_count = 0
+    while sessions_heap and sessions_heap[0][0] <= now:
+        expiry, sid = heapq.heappop(sessions_heap)
+        data = sessions.get(sid)
+        if data is None:
+            continue
+
+        # Verify actual expiry timestamp from DocumentSession instance
+        last_accessed = getattr(data, "last_accessed", now) if not isinstance(data, dict) else data.get("last_accessed", now)
+
+        actual_expiry = last_accessed + settings.SESSION_TTL_SECONDS
+        if actual_expiry <= now:
+            del sessions[sid]
+            if hasattr(app.state, "retrievers") and sid in app.state.retrievers:
+                del app.state.retrievers[sid]
+            expired_count += 1
+        else:
+            # Session was refreshed; re-push updated expiry to heap
+            heapq.heappush(sessions_heap, (actual_expiry, sid))
+    return expired_count
+
+
 # #What: Background async loop purging expired sessions based on TTL
 async def cleanup_sessions():
     """Background task to clean up expired sessions using a min-heap."""
     while True:
         try:
             await asyncio.sleep(600)  # run every 10 minutes
-            now = time.time()
             async with sessions_lock:
-                expired_count = 0
-                while sessions_heap and sessions_heap[0][0] <= now:
-                    expiry, sid = heapq.heappop(sessions_heap)
-                    data = sessions.get(sid)
-                    if data is None:
-                        continue
-
-                    # Verify actual expiry timestamp from DocumentSession instance
-                    last_accessed = getattr(data, "last_accessed", now) if not isinstance(data, dict) else data.get("last_accessed", now)
-
-                    actual_expiry = last_accessed + settings.SESSION_TTL_SECONDS
-                    if actual_expiry <= now:
-                        del sessions[sid]
-                        if hasattr(app.state, "retrievers") and sid in app.state.retrievers:
-                            del app.state.retrievers[sid]
-                        expired_count += 1
-                    else:
-                        # Session was refreshed; re-push updated expiry to heap
-                        heapq.heappush(sessions_heap, (actual_expiry, sid))
-
+                expired_count = run_cleanup_pass()
                 if expired_count > 0:
                     logger.info(f"Cleaned up {expired_count} expired sessions.")
         except asyncio.CancelledError:
