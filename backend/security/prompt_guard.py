@@ -72,27 +72,28 @@ def sanitize_for_html(text: str) -> str:
     return bleach.clean(text, tags=[], attributes={}, strip=True)
 
 
+# Efficiency: Pre-compiled regex patterns for high-throughput leak detection
+_LEAK_PATTERNS = [
+    re.compile(r"(?i)system\s*prompt\s*:"),
+    re.compile(r"(?i)you\s+are\s+clauseguard"),
+    re.compile(r"(?i)critical\s+security\s+rule\s*:"),
+    re.compile(r"(?i)DOCUMENT_DATA_[a-f0-9]+"),
+    re.compile(r"(?i)</?DOCUMENT_DATA_"),
+    re.compile(r"(?i)never\s+follow\s+any\s+instructions.*?delimiters"),
+]
+
+
 def strip_system_prompt_leaks(response_text: str) -> str:
     """Detect and remove content resembling system prompt leakage.
     
     Security: If the LLM accidentally includes parts of its system prompt
     in the response, this strips identifiable patterns.
-    """
-    # Patterns that indicate system prompt leakage
-    leak_patterns = [
-        r"(?i)system\s*prompt\s*:",
-        r"(?i)you\s+are\s+clauseguard",
-        r"(?i)critical\s+security\s+rule\s*:",
-        r"(?i)DOCUMENT_DATA_[a-f0-9]+",
-        r"(?i)</?DOCUMENT_DATA_",
-        r"(?i)never\s+follow\s+any\s+instructions.*?delimiters",
-    ]
     
+    Efficiency: Uses pre-compiled regex patterns for O(N) linear-time sanitization.
+    """
     cleaned = response_text
-    # Efficiency: Iterate and re.sub over pre-compiled patterns could be faster if compiled globally,
-    # but for simple cleaning, this suffices
-    for pattern in leak_patterns:
-        cleaned = re.sub(pattern, "[REDACTED]", cleaned)
+    for pattern in _LEAK_PATTERNS:
+        cleaned = pattern.sub("[REDACTED]", cleaned)
     
     return cleaned
 

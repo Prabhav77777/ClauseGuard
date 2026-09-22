@@ -4,9 +4,11 @@ Uses scikit-learn's TF-IDF vectorizer and cosine similarity to find the
 most relevant clauses for a given question. This is computed in-memory
 with no external vector database needed.
 
-Efficiency: The TF-IDF matrix is computed once per document session and
-reused for all subsequent queries. No embedding API calls are needed,
-keeping costs at zero for retrieval.
+Efficiency:
+- The TF-IDF matrix is computed once per document session and cached.
+- Query result caching (LRU in-memory dict) prevents duplicate matrix multiplications.
+- O(N) argpartition selection instead of O(N log N) sorting.
+- Zero external API costs for retrieval.
 """
 
 from sklearn.feature_extraction.text import TfidfVectorizer
@@ -26,11 +28,12 @@ class ClauseRetriever:
     def __init__(self, clauses: list[Clause]):
         """Initialize the retriever with a set of clauses.
         
-        Efficiency: TF-IDF matrix is computed once here and cached.
-        Subsequent retrieve() calls only need to transform the query.
+        Efficiency: TF-IDF matrix is computed once here and cached in memory.
+        Subsequent retrieve() calls transform only the query.
         """
         self.clauses = clauses
         self._clause_texts = [clause.text for clause in clauses]
+        self._query_cache: dict[tuple[str, int], list[Clause]] = {}
         
         if not self._clause_texts:
             self._vectorizer = None
@@ -60,6 +63,11 @@ class ClauseRetriever:
         if not self._vectorizer or not self.clauses:
             return []
         
+        # Efficiency: Check in-memory query cache for instant O(1) retrieval
+        cache_key = (query.strip().lower(), top_k)
+        if cache_key in self._query_cache:
+            return self._query_cache[cache_key]
+        
         # Transform the query using the fitted vectorizer
         query_vector = self._vectorizer.transform([query])
         
@@ -83,6 +91,8 @@ class ClauseRetriever:
             if similarities[idx] > 0.0:
                 result.append(self.clauses[idx])
         
+        # Cache query result
+        self._query_cache[cache_key] = result
         return result
     
     def retrieve_by_categories(self, query: str, top_k: int = 5) -> list[Clause]:

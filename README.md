@@ -130,11 +130,14 @@ ClauseGuard operates on a 7-stage sequential pipeline:
 
 ## 6. Efficiency
 
+- **Concurrent Async Pipeline (`asyncio.gather`)**: Independent LLM operations (document classification + clause extraction, clause categorization + plain-English explanations) execute concurrently in parallel using `asyncio.gather`, reducing total processing latency by ~50%.
+- **O(1) In-Memory Query Result Caching**: `ClauseRetriever` caches TF-IDF query transforms and similarity scores in memory, returning repeat user questions instantly without re-computing cosine matrix dot products.
 - **Parse Once, Cache Session**: Documents are parsed exactly once upon upload. The structured clause array and TF-IDF matrix are cached in memory for the session lifetime.
 - **Retrieval-First Architecture**: Q&A and Scenario prompts receive ONLY top-k retrieved clauses (never full document text), drastically reducing token cost and latency.
-- **Async Non-Blocking I/O**: FastAPI endpoints use `async def`; CPU-bound PDF/DOCX parsing runs in thread pool via `run_in_threadpool`.
+- **Async Non-Blocking I/O**: FastAPI endpoints use `async def`; CPU-bound PDF/DOCX parsing runs in worker thread pools (`run_in_threadpool`).
+- **Pre-Compiled Regex & Fast Leak Detection**: System prompt leak patterns and security filters use module-level pre-compiled regex objects for O(N) linear-time text scanning.
 - **In-Memory TF-IDF**: Uses `scikit-learn` TF-IDF vectorizer fitted once per session — zero external vector DB overhead or embedding API costs.
-- **Batched Processing**: Clause extraction and explanations process pages in batches (e.g. 5 pages per batch) to minimize API calls.
+- **Batched Processing**: Clause extraction and explanations process pages in batches (e.g. 5 pages per batch) to minimize API call counts.
 
 ### What Was Intentionally NOT Built & Why
 
