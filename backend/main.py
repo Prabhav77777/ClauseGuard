@@ -81,9 +81,11 @@ app.add_middleware(
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
+@app.get("/")
+@app.get("/health")
 @app.get("/api/health")
 async def health_check():
-    return {"status": "ok"}
+    return {"status": "ok", "service": "ClauseGuard API"}
 
 from backend.api.documents import router as documents_router
 from backend.api.chat import router as chat_router

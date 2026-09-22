@@ -3,14 +3,11 @@ services:
   - type: web
     name: clauseguard-backend
     env: python
-    region: oregon
-    plan: free
     buildCommand: pip install -r requirements.txt
     startCommand: uvicorn backend.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /api/health
     envVars:
       - key: GEMINI_API_KEY
         sync: false
       - key: GEMINI_MODEL
         value: gemini-2.5-flash
-      - key: PYTHON_VERSION
-        value: 3.11.9
