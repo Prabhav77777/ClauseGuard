@@ -162,6 +162,11 @@ class InconsistencyResult(BaseModel):
     description: str = Field(..., description="Description of the inconsistency")
 
 
+class InconsistencyReport(BaseModel):
+    """Container schema for structured LLM response listing clause inconsistencies."""
+    inconsistencies: list[InconsistencyResult] = Field(default_factory=list, description="List of detected clause inconsistencies")
+
+
 class ValidationResult(BaseModel):
     """Uncertainty validation — binary check on whether an answer is supported."""
     is_supported: bool = Field(..., description="Whether the answer is supported by the source clauses")
@@ -191,6 +196,7 @@ class DocumentSession(BaseModel):
     unclear_items: list[str] = Field(default_factory=list, description="Accumulated unclear items for lawyer brief")
     lawyer_questions: list[str] = Field(default_factory=list, description="Accumulated lawyer questions")
     last_accessed: float = Field(default_factory=time.time, description="Timestamp of last activity in seconds")
+    inconsistencies: Optional[list[InconsistencyResult]] = Field(default=None, description="Lazy-cached inconsistency analysis result")
 
 
 # --- API Request/Response ---

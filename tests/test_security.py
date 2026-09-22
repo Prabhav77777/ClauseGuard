@@ -195,3 +195,26 @@ class TestGenericErrorHandler:
         assert "Traceback" not in response.text
         assert "D:\\secret" not in response.text
 
+
+class TestReadEndpointsRateLimiting:
+    """Test rate limiting on read endpoints to prevent session ID enumeration attacks."""
+
+    def test_read_endpoint_rate_limit_exceeded(self):
+        """Exceeding 60 requests/minute on read routes returns 429 RateLimitExceeded."""
+        from backend.main import limiter
+        limiter.reset()
+
+        client = TestClient(app)
+        sid = "non_existent_session_for_rate_limit_test"
+
+        # Make 60 requests (allowed)
+        for _ in range(60):
+            res = client.get(f"/api/documents/{sid}/clauses")
+            assert res.status_code == 404  # Session not found, but rate limit allowed
+
+        # 61st request should be rate limited (429)
+        res_overflow = client.get(f"/api/documents/{sid}/clauses")
+        assert res_overflow.status_code == 429
+
+        limiter.reset()
+

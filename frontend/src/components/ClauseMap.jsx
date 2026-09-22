@@ -11,7 +11,7 @@ import React, { useState, useMemo } from 'react'
  * - Semantic landmark regions (section, article, h2, h3)
  * - Keyboard navigable interactive card triggers
  */
-function ClauseMap({ clauses, docInfo }) {
+function ClauseMap({ clauses, docInfo, inconsistencies }) {
   // Efficiency: Memoize grouped clauses by category to prevent redundant re-computation
   const grouped = useMemo(() => {
     const acc = {}
@@ -53,6 +53,28 @@ function ClauseMap({ clauses, docInfo }) {
           </p>
         )}
       </div>
+
+      {/* Inconsistency Warnings Section */}
+      {inconsistencies && inconsistencies.length > 0 && (
+        <div style={{ marginBottom: 'var(--space-6)', padding: 'var(--space-4)', borderRadius: 'var(--radius-md)', backgroundColor: '#fff3cd', border: '1px solid #ffeeba' }} role="region" aria-label="Detected clause inconsistencies">
+          <h3 style={{ fontSize: 'var(--text-lg)', marginBottom: 'var(--space-2)', color: '#856404', display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
+            ⚠️ Detected Clause Inconsistencies ({inconsistencies.length})
+          </h3>
+          <p style={{ fontSize: 'var(--text-xs)', color: '#856404', marginBottom: 'var(--space-3)' }}>
+            <em>The system detected contradictory provisions between clauses. Note: ClauseGuard cannot determine which clause legally controls.</em>
+          </p>
+          {inconsistencies.map((item, idx) => (
+            <div key={idx} style={{ backgroundColor: '#ffffff', padding: 'var(--space-3)', borderRadius: 'var(--radius-sm)', marginBottom: 'var(--space-2)', borderLeft: '4px solid #ffc107' }}>
+              <div style={{ fontSize: 'var(--text-xs)', fontWeight: 'bold', color: 'var(--color-text-primary)', marginBottom: 'var(--space-1)' }}>
+                Clauses: {item.clause_ids?.join(', ')}
+              </div>
+              <p style={{ fontSize: 'var(--text-sm)', margin: 0, color: 'var(--color-text-secondary)' }}>
+                {item.description}
+              </p>
+            </div>
+          ))}
+        </div>
+      )}
 
       {Object.entries(grouped).map(([category, categoryClauses]) => (
         <div key={category} style={{ marginBottom: 'var(--space-6)' }} role="region" aria-label={`${category} clauses`}>

@@ -16,6 +16,7 @@ import ChatPanel from './components/ChatPanel'
 function App() {
   const [sessionId, setSessionId] = useState(null)
   const [clauses, setClauses] = useState([])
+  const [inconsistencies, setInconsistencies] = useState([])
   const [docInfo, setDocInfo] = useState(null)
   const [activeTab, setActiveTab] = useState('clauses')
   const [error, setError] = useState(null)
@@ -30,6 +31,12 @@ function App() {
       total_clauses: data.total_clauses,
     })
     setError(null)
+
+    // Fetch cross-clause inconsistencies asynchronously
+    fetch(`${API_BASE}/api/documents/${data.session_id}/inconsistencies`)
+      .then((res) => (res.ok ? res.json() : []))
+      .then((items) => setInconsistencies(items))
+      .catch(() => setInconsistencies([]))
   }
 
   const handleUploadError = (errMsg) => {
@@ -114,7 +121,7 @@ function App() {
           {!sessionId ? (
             <FileUpload onSuccess={handleUploadSuccess} onError={handleUploadError} />
           ) : (
-            <ClauseMap clauses={clauses} docInfo={docInfo} sessionId={sessionId} />
+            <ClauseMap clauses={clauses} docInfo={docInfo} sessionId={sessionId} inconsistencies={inconsistencies} />
           )}
         </section>
 

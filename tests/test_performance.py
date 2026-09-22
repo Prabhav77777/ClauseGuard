@@ -204,6 +204,45 @@ class TestPerformanceOptimizations:
         assert data1["session_id"] != data2["session_id"]
         assert data1["total_clauses"] == data2["total_clauses"]
 
+    @pytest.mark.asyncio
+    async def test_concurrent_uploads_unlocked_cache(self, sample_pdf_bytes, monkeypatch):
+        """Verify concurrent uploads of different documents process in parallel without serializing behind content cache lock."""
+        import asyncio
+
+        import httpx
+
+        from backend.api.documents import _DOCUMENT_CONTENT_CACHE
+        from backend.main import app
+        from backend.models.schemas import ClassificationResult, Clause, DocumentType
+
+        _DOCUMENT_CONTENT_CACHE.clear()
+
+        async def mock_process_document_delayed(file_bytes, file_type):
+            await asyncio.sleep(0.2)
+            return (
+                [],
+                [Clause(id="clause_000", section="S1", page=1, text="Text")],
+                ClassificationResult(doc_type=DocumentType.EMPLOYMENT_AGREEMENT, confidence=0.99)
+            )
+
+        monkeypatch.setattr("backend.api.documents.process_document", mock_process_document_delayed)
+
+        bytes1 = sample_pdf_bytes
+        bytes2 = sample_pdf_bytes + b"%extra_content_for_different_hash%"
+
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://testserver") as client:
+            t0 = time.perf_counter()
+            res1, res2 = await asyncio.gather(
+                client.post("/api/documents/upload", files={"file": ("file1.pdf", bytes1, "application/pdf")}),
+                client.post("/api/documents/upload", files={"file": ("file2.pdf", bytes2, "application/pdf")})
+            )
+            elapsed = time.perf_counter() - t0
+
+            assert res1.status_code == 200
+            assert res2.status_code == 200
+            # Serialized execution would take >= 0.4s. Parallel execution takes ~0.2s (< 0.35s).
+            assert elapsed < 0.35, f"Elapsed time {elapsed:.3f}s indicates serialized execution behind lock"
+
     def test_retriever_precision_recall_benchmark(self, sample_clauses):
         """Verify TF-IDF retrieval precision and recall exceed 90% target threshold."""
         retriever = ClauseRetriever(sample_clauses)

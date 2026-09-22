@@ -18,7 +18,8 @@ from fastapi import APIRouter, File, HTTPException, Request, UploadFile, status
 from fastapi.responses import PlainTextResponse
 
 from backend.core.limiter import limiter
-from backend.models.schemas import Clause, DocumentSession, UploadResponse
+from backend.models.schemas import Clause, DocumentSession, InconsistencyResult, UploadResponse
+from backend.prompts.inconsistency import detect_inconsistencies
 from backend.security.validation import validate_upload
 from backend.services.brief_generator import generate_brief
 from backend.services.clause_extractor import process_document
@@ -79,18 +80,24 @@ async def upload_document(request: Request, file: UploadFile = File(...)):
         # Efficiency: Compute SHA-256 hash to check if this exact file was already processed
         content_hash = hashlib.sha256(file_bytes).hexdigest()
 
+        cached = None
         async with _content_cache_lock:
             if content_hash in _DOCUMENT_CONTENT_CACHE:
-                logger.info(f"Efficiency: Content-hash cache hit for SHA256 {content_hash[:8]}")
                 cached = _DOCUMENT_CONTENT_CACHE[content_hash]
-                pages = cached["pages"]
-                clauses = cached["clauses"]
-                classification = cached["classification"]
-                retriever = cached["retriever"]
-            else:
-                # Run the full processing pipeline
-                pages, clauses, classification = await process_document(file_bytes, file_type)
-                retriever = ClauseRetriever(clauses)
+
+        if cached:
+            logger.info(f"Efficiency: Content-hash cache hit for SHA256 {content_hash[:8]}")
+            pages = cached["pages"]
+            clauses = cached["clauses"]
+            classification = cached["classification"]
+            retriever = cached["retriever"]
+        else:
+            # Efficiency: Run process_document UNLOCKED so concurrent processing of different files does not serialize
+            pages, clauses, classification = await process_document(file_bytes, file_type)
+            retriever = ClauseRetriever(clauses)
+
+            # #Uncertain: Rare race condition if identical uploads occur concurrently; both process unlocked before caching.
+            async with _content_cache_lock:
                 _DOCUMENT_CONTENT_CACHE[content_hash] = {
                     "pages": pages,
                     "clauses": clauses,
@@ -147,8 +154,9 @@ async def upload_document(request: Request, file: UploadFile = File(...)):
         await file.close()
 
 
-# #What: Returns all extracted clauses for a given session ID
+# #Business-Intent: Higher rate limit (60/min) for cheap read endpoints balances UI navigation with session ID enumeration protection.
 @router.get("/{session_id}/clauses", response_model=list[Clause])
+@limiter.limit("60/minute")
 async def get_clauses(session_id: str, request: Request):
     """Get all clauses for a session."""
     sessions = _get_sessions(request)
@@ -162,8 +170,9 @@ async def get_clauses(session_id: str, request: Request):
     return session.clauses
 
 
-# #What: Returns a single clause by ID from session state
+# #Business-Intent: Higher rate limit (60/min) for cheap read endpoints balances UI navigation with session ID enumeration protection.
 @router.get("/{session_id}/clauses/{clause_id}", response_model=Clause)
+@limiter.limit("60/minute")
 async def get_clause(session_id: str, clause_id: str, request: Request):
     """Get a specific clause by ID."""
     sessions = _get_sessions(request)
@@ -185,8 +194,31 @@ async def get_clause(session_id: str, clause_id: str, request: Request):
     )
 
 
-# #Business-Intent: Compiles accumulated user questions and unclear items into an exportable Markdown Lawyer Brief satisfy legal professional preparation use case.
+# #Business-Intent: Higher rate limit (60/min) for cheap read endpoints balances UI navigation with session ID enumeration protection.
+@router.get("/{session_id}/inconsistencies", response_model=list[InconsistencyResult])
+@limiter.limit("60/minute")
+async def get_inconsistencies_endpoint(session_id: str, request: Request):
+    """Get or compute cross-clause inconsistencies for a session."""
+    sessions = _get_sessions(request)
+    session = sessions.get(session_id)
+    if not session:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Session not found"
+        )
+    session.last_accessed = time.time()
+
+    if session.inconsistencies is not None:
+        return session.inconsistencies
+
+    inconsistencies = await detect_inconsistencies(session.clauses)
+    session.inconsistencies = inconsistencies
+    return inconsistencies
+
+
+# #Business-Intent: Higher rate limit (60/min) for cheap read endpoints balances UI navigation with session ID enumeration protection.
 @router.get("/{session_id}/brief")
+@limiter.limit("60/minute")
 async def get_lawyer_brief(session_id: str, request: Request):
     """Generate and return the Lawyer Prep Brief as markdown."""
     sessions = _get_sessions(request)
