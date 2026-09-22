@@ -217,11 +217,11 @@ Open `http://localhost:5173` in your browser.
 
 ---
 
-## 10. Demo Script (2–4 Minutes)
+<!-- ## 10. Demo Script (2–4 Minutes)
 
 1. **Upload**: Drag and drop `tests/fixtures/sample_employment_agreement.pdf`.
 2. **Clause Map**: View auto-generated clause cards organized by categories (Compensation, Probation, Non-Compete, Termination). Expand a card to see plain-English explanations and verbatim page-referenced source text.
 3. **Ask Question**: Ask *"What happens if I resign during probation?"* Notice the top-k clause retrieval and three-way certainty output (**Stated** / **Interpretation** / **Not Established**).
 4. **Lawyer Question**: Observe the automatically suggested question for your lawyer.
 5. **Prompt Injection Defense**: Observe Section 11 of the sample PDF containing embedded injection instructions (`IGNORE PREVIOUS INSTRUCTIONS...`). Notice how ClauseGuard treats it as inert document text without altering AI behavior.
-6. **Generate Lawyer Brief**: Click **"📋 Generate Lawyer Brief"** in the header to download an exportable Markdown briefing document for your legal consultation.
+6. **Generate Lawyer Brief**: Click **"📋 Generate Lawyer Brief"** in the header to download an exportable Markdown briefing document for your legal consultation. -->
