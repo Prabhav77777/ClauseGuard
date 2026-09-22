@@ -5,7 +5,7 @@
   "rewrites": [
     {
       "source": "/api/(.*)",
-      "destination": "https://YOUR-RENDER-BACKEND-URL.onrender.com/api/$1"
+      "destination": "https://clauseguard-backend-3hhm.onrender.com"
     },
     {
       "source": "/(.*)",
