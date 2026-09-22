@@ -53,7 +53,7 @@ export default function FileUpload({ onSuccess, onError }) {
       })
 
       if (!res.ok) {
-        const err = await res.json().catch(() => ({ detail: 'Upload failed' }))
+        const err = await res.json().catch(() => ({ detail: `Server error (${res.status} ${res.statusText})` }))
         throw new Error(err.detail || `Server error (${res.status})`)
       }
 
@@ -61,7 +61,10 @@ export default function FileUpload({ onSuccess, onError }) {
       setStatusMsg(`✓ Analyzed "${file.name}": ${data.total_clauses} clauses found across ${data.total_pages} pages.`)
       onSuccess?.(data)
     } catch (err) {
-      const msg = err.message || 'Upload failed. Please try again.'
+      let msg = err.message || 'Upload failed. Please try again.'
+      if (msg.includes('Failed to fetch') || msg.includes('NetworkError')) {
+        msg = 'Cannot connect to backend server. Make sure Uvicorn is running on http://localhost:8000 (uvicorn backend.main:app --reload)'
+      }
       setStatusMsg(`Error: ${msg}`)
       onError?.(msg)
     } finally {

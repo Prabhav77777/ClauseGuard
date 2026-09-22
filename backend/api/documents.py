@@ -84,7 +84,20 @@ async def upload_document(request: Request, file: UploadFile = File(...)):
             total_clauses=len(clauses),
             clauses=clauses,
         )
-    
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error processing document upload: {e}", exc_info=True)
+        err_str = str(e)
+        if "api_key" in err_str.lower() or "authentication" in err_str.lower() or "anthropic" in err_str.lower():
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Anthropic API key is invalid or missing. Please check your ANTHROPIC_API_KEY setting in .env."
+            )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error processing document: {err_str}"
+        )
     finally:
         await file.close()
 

@@ -50,6 +50,17 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
+    def __repr__(self) -> str:
+        masked_key = "***" if self.ANTHROPIC_API_KEY else ""
+        return (
+            f"Settings(CLAUDE_MODEL='{self.CLAUDE_MODEL}', "
+            f"MAX_FILE_SIZE_MB={self.MAX_FILE_SIZE_MB}, "
+            f"ANTHROPIC_API_KEY='{masked_key}')"
+        )
+
+    def __str__(self) -> str:
+        return self.__repr__()
+
 
 # Module-level singleton — loaded once at import time
 settings = Settings()

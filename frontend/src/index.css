@@ -58,7 +58,8 @@
     --color-primary-light: #1e3a5f;
     --color-success-light: #14532d;
     --color-warning-light: #451a03;
-    --color-danger-light: #450a0a;
+    --color-danger-light: rgba(220, 38, 38, 0.15);
+    --color-danger: #f87171;
     --color-info-light: #164e63;
   }
 }
@@ -424,12 +425,18 @@ body {
 
 /* Error state */
 .error-message {
+  grid-column: 1 / -1;
   padding: var(--space-4);
   background: var(--color-danger-light);
   color: var(--color-danger);
-  border: 1px solid currentColor;
+  border: 1px solid var(--color-danger);
   border-radius: var(--radius);
   font-size: var(--text-sm);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-bottom: var(--space-4);
 }
 
 /* Page reference */
