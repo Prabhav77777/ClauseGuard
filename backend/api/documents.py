@@ -7,10 +7,12 @@ processed clause data.
 
 import logging
 import uuid
+from typing import Any
 
 from fastapi import APIRouter, File, HTTPException, Request, UploadFile, status
 from fastapi.responses import PlainTextResponse
 
+from backend.core.limiter import limiter
 from backend.models.schemas import Clause, DocumentSession, UploadResponse
 from backend.security.validation import validate_upload
 from backend.services.brief_generator import generate_brief
@@ -22,21 +24,24 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/documents", tags=["documents"])
 
 
-def _get_sessions(request: Request) -> dict:
+def _get_sessions(request: Request) -> dict[str, Any]:
     """Access the in-memory session store from app state safely."""
     if not hasattr(request.app.state, "sessions"):
         request.app.state.sessions = {}
-    return request.app.state.sessions
+    sessions_dict: dict[str, Any] = request.app.state.sessions
+    return sessions_dict
 
 
-def _get_retrievers(request: Request) -> dict:
+def _get_retrievers(request: Request) -> dict[str, Any]:
     """Access the retriever cache from app state safely."""
     if not hasattr(request.app.state, "retrievers"):
         request.app.state.retrievers = {}
-    return request.app.state.retrievers
+    retrievers_dict: dict[str, Any] = request.app.state.retrievers
+    return retrievers_dict
 
 
 @router.post("/upload", response_model=UploadResponse)
+@limiter.limit("10/minute")
 async def upload_document(request: Request, file: UploadFile = File(...)):
     """Upload and process a legal document.
 

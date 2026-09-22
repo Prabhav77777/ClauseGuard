@@ -68,4 +68,5 @@ def call_gemini_structured(
         config=config,
     )
 
-    return response_schema.model_validate_json(response.text)
+    raw_text = response.text or "{}"
+    return response_schema.model_validate_json(raw_text)

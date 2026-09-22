@@ -9,6 +9,7 @@ import logging
 
 from fastapi import APIRouter, HTTPException, Request, status
 
+from backend.core.limiter import limiter
 from backend.models.schemas import AskRequest, QAResponse, ScenarioRequest, ScenarioResponse
 from backend.services.legal_analyzer import (
     analyze_scenario_for_document,
@@ -49,6 +50,7 @@ def _get_retriever(session_id: str, request: Request):
 
 
 @router.post("/{session_id}/ask", response_model=QAResponse)
+@limiter.limit("30/minute")
 async def ask_question(session_id: str, body: AskRequest, request: Request):
     """Ask a question about the uploaded document.
 
@@ -76,6 +78,7 @@ async def ask_question(session_id: str, body: AskRequest, request: Request):
 
 
 @router.post("/{session_id}/scenario", response_model=ScenarioResponse)
+@limiter.limit("20/minute")
 async def analyze_scenario(session_id: str, body: ScenarioRequest, request: Request):
     """Analyze a hypothetical scenario against the document.
 

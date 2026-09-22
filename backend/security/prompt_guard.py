@@ -69,7 +69,7 @@ def sanitize_for_html(text: str) -> str:
     Security: Prevents XSS via document text that gets rendered in the frontend.
     Uses bleach to strip all HTML tags and attributes.
     """
-    return bleach.clean(text, tags=[], attributes={}, strip=True)
+    return str(bleach.clean(text, tags=[], attributes={}, strip=True))
 
 
 # Efficiency: Pre-compiled regex patterns for high-throughput leak detection

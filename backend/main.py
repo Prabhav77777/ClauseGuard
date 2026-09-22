@@ -8,14 +8,14 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse
-from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
-from slowapi.util import get_remote_address
 
 from backend.api.chat import router as chat_router
 from backend.api.compare import router as compare_router
 from backend.api.documents import router as documents_router
 from backend.config import settings
+from backend.core.limiter import limiter
 
 # Logging configuration
 logging.basicConfig(
@@ -23,9 +23,6 @@ logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
 logger = logging.getLogger(__name__)
-
-# Rate limiter
-limiter = Limiter(key_func=get_remote_address)
 
 # Session store
 sessions: dict[str, Any] = {}
@@ -92,18 +89,20 @@ async def add_security_headers(request: Request, call_next):
     return response
 
 
-# CORS middleware
+# Security: CORS Middleware
+# Production: Set CORS_ORIGINS in .env to explicit frontend domain list (e.g. ["https://clauseguard.vercel.app"])
+# Development fallback: Defaults to local origins with restrictive methods for API security.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.CORS_ORIGINS,
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST", "OPTIONS"],
     allow_headers=["*"],
 )
 
 # Rate limiter exception handler
 app.state.limiter = limiter
-app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)  # type: ignore[arg-type]
 
 
 # Security: Generic 500 error handler prevents stack trace and file path disclosure in production

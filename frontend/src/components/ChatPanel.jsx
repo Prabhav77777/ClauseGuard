@@ -19,7 +19,7 @@ function ChatPanel({ sessionId, clauses }) {
   const [messages, setMessages] = useState([{
     id: 'welcome',
     sender: 'assistant',
-    text: 'I\'ve analyzed your document. Ask me anything about it! Try questions like:\n• "What are my notice period obligations?"\n• "What happens if I resign during probation?"\n• "Are there any non-compete restrictions?"',
+    text: 'I\'ve analyzed your document. Ask me anything about it! Try scenarios like:\n• "Can I be terminated without notice?"\n• "What am I liable for if I leave early?"\n• "What happens if I resign during probation?"\n• "What happens to my IP if I build something on my own time?"',
   }])
   const [input, setInput] = useState('')
   const [isLoading, setIsLoading] = useState(false)

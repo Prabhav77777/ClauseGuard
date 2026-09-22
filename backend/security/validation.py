@@ -18,7 +18,12 @@ ZIP_MAGIC = b"PK\x03\x04"
 
 
 def validate_file_size(file_bytes: bytes) -> None:
-    """Reject files exceeding the configured size limit."""
+    """Reject empty (0 bytes) or oversized files exceeding configured size limit."""
+    if not file_bytes or len(file_bytes) == 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Uploaded file is empty (0 bytes)"
+        )
     max_bytes = settings.MAX_FILE_SIZE_MB * 1024 * 1024
     if len(file_bytes) > max_bytes:
         raise HTTPException(

@@ -40,7 +40,7 @@ async def analyze_scenario(scenario: str, retrieved_clauses: list[Clause]) -> Sc
 
 You are NOT a lawyer. You do NOT provide legal advice or conclusions about enforceability.
 
-For the given scenario, analyze:
+For the given scenario (e.g. 'Can I be terminated without notice?', 'What am I liable for if I leave early?', 'What happens to my IP?'), analyze:
 1. 'what_document_says': What the document EXPLICITLY states that is relevant (quote relevant text)
 2. 'potential_implication': What could REASONABLY be inferred (ALWAYS label this as "Based on interpretation of the clauses..." - never state as fact or legal conclusion)
 3. 'unclear': What CANNOT be determined and would need clarification
@@ -50,8 +50,8 @@ Rules:
 1. ONLY cite clause IDs from this list: {available_ids}
 2. Implications must be labeled as interpretation, NEVER as legal conclusions
 3. Never fabricate clauses, dates, penalties, or obligations
-4. Consider how multiple clauses might interact with each other
-5. If the scenario involves timing, look for probation periods, notice periods, and effective dates"""
+4. Consider how multiple clauses might interact with each other (e.g., notice requirements vs probation terms vs IP assignment)
+5. If the scenario involves timing or early departure, examine probation periods, notice periods, liquidated damages, and effective dates"""
 
     try:
         result = call_gemini_structured(

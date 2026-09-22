@@ -8,6 +8,7 @@ import logging
 
 from fastapi import APIRouter, File, HTTPException, Request, UploadFile, status
 
+from backend.core.limiter import limiter
 from backend.models.schemas import ComparisonResult
 from backend.prompts.comparison import compare_documents
 from backend.security.validation import validate_upload
@@ -19,6 +20,7 @@ router = APIRouter(prefix="/api/compare", tags=["compare"])
 
 
 @router.post("/", response_model=ComparisonResult)
+@limiter.limit("10/minute")
 async def compare_two_documents(
     request: Request,
     file1: UploadFile = File(...),

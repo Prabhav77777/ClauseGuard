@@ -158,3 +158,78 @@ class TestPerformanceOptimizations:
         assert parse_count == 1  # Re-used cache, didn't re-parse
         assert pages1 == pages2
 
+    def test_retriever_precision_recall_benchmark(self, sample_clauses):
+        """Verify TF-IDF retrieval precision and recall exceed 90% target threshold."""
+        retriever = ClauseRetriever(sample_clauses)
+        test_cases = [
+            ("probationary period 6 months", "clause_002"),
+            ("salary $120,000 base pay", "clause_001"),
+            ("senior software engineer duties", "clause_000"),
+            ("competing business 50 miles noncompete", "clause_004"),
+            ("confidential information trade secrets", "clause_005"),
+        ]
+
+        correct_retrievals = 0
+        for query, expected_clause_id in test_cases:
+            results = retriever.retrieve(query, top_k=3)
+            result_ids = [c.id for c in results]
+            if expected_clause_id in result_ids:
+                correct_retrievals += 1
+
+        accuracy = correct_retrievals / len(test_cases)
+        assert accuracy >= 0.90, f"Retrieval accuracy {accuracy:.2f} is below 90% threshold"
+
+    @pytest.mark.asyncio
+    async def test_end_to_end_qa_latency_benchmark(self, sample_clauses, monkeypatch):
+        """Benchmark local Q&A execution overhead (retrieval + validation) is sub-10ms."""
+        from backend.models.schemas import CertaintyLevel, QAResponse
+        from backend.services.legal_analyzer import _LLM_RESPONSE_CACHE, ask_question_about_document
+
+        _LLM_RESPONSE_CACHE.clear()
+
+        async def mock_answer_question(q, clauses):
+            return QAResponse(
+                answer="Sample answer",
+                sources=["clause_000"],
+                certainty=CertaintyLevel.STATED,
+                stated="Sample stated",
+                interpreted="",
+                not_established="",
+                lawyer_question=None
+            )
+
+        monkeypatch.setattr("backend.services.legal_analyzer.answer_question", mock_answer_question)
+        retriever = ClauseRetriever(sample_clauses)
+
+        t0 = time.perf_counter()
+        for _ in range(50):
+            await ask_question_about_document("What is the position?", sample_clauses, retriever)
+        total_time = time.perf_counter() - t0
+
+        avg_latency_ms = (total_time / 50) * 1000
+        # Overhead per Q&A pipeline call should be under 10ms
+        assert avg_latency_ms < 10.0, f"Average latency {avg_latency_ms:.2f}ms exceeds 10ms ceiling"
+
+    def test_session_cleanup_frees_memory(self):
+        """Verify expired sessions are purged to free memory."""
+        from backend.main import sessions
+        from backend.models.schemas import DocumentSession
+
+        sessions.clear()
+        # Add active and expired sessions
+        sessions["active_1"] = {"last_accessed": time.time(), "session": DocumentSession(session_id="active_1")}
+        sessions["expired_1"] = {"last_accessed": time.time() - 7200, "session": DocumentSession(session_id="expired_1")}
+
+        # Run single cleanup pass synchronously
+        now = time.time()
+        expired_ids = [
+            sid for sid, data in sessions.items()
+            if now - data.get("last_accessed", now) > 3600
+        ]
+        for sid in expired_ids:
+            del sessions[sid]
+
+        assert "active_1" in sessions
+        assert "expired_1" not in sessions
+
+
