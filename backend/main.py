@@ -1,4 +1,5 @@
 import asyncio
+import heapq
 import logging
 import time
 from contextlib import asynccontextmanager
@@ -24,26 +25,60 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Session store
+# Session store & Efficiency min-heap for O(1) peek / O(log N) session expiration
 sessions: dict[str, Any] = {}
+sessions_heap: list[tuple[float, str]] = []  # tuple of (expiry_timestamp, session_id)
 sessions_lock = asyncio.Lock()
 
 
+def push_session_expiry(session_id: str, last_accessed: float | None = None):
+    """Push a session entry into the min-heap ordered by expiry timestamp."""
+    ts = last_accessed if last_accessed is not None else time.time()
+    expiry = ts + settings.SESSION_TTL_SECONDS
+    heapq.heappush(sessions_heap, (expiry, session_id))
+
+
+def sync_sessions_heap():
+    """Synchronize any un-tracked sessions in sessions dict into the min-heap."""
+    heap_sids = {sid for _, sid in sessions_heap}
+    for sid, data in sessions.items():
+        if sid not in heap_sids:
+            last_accessed = time.time()
+            if isinstance(data, dict):
+                last_accessed = data.get("last_accessed", time.time())
+            push_session_expiry(sid, last_accessed)
+
+
 async def cleanup_sessions():
-    """Background task to clean up expired sessions."""
+    """Background task to clean up expired sessions using a min-heap."""
     while True:
         try:
             await asyncio.sleep(600)  # run every 10 minutes
             now = time.time()
             async with sessions_lock:
-                expired = [
-                    sid for sid, data in sessions.items()
-                    if now - data.get("last_accessed", now) > settings.SESSION_TTL_SECONDS
-                ]
-                for sid in expired:
-                    del sessions[sid]
-                if expired:
-                    logger.info(f"Cleaned up {len(expired)} expired sessions.")
+                sync_sessions_heap()
+                expired_count = 0
+                while sessions_heap and sessions_heap[0][0] <= now:
+                    expiry, sid = heapq.heappop(sessions_heap)
+                    data = sessions.get(sid)
+                    if data is None:
+                        continue
+
+                    # Verify actual expiry timestamp in case session activity was updated
+                    last_accessed = now
+                    if isinstance(data, dict):
+                        last_accessed = data.get("last_accessed", now)
+
+                    actual_expiry = last_accessed + settings.SESSION_TTL_SECONDS
+                    if actual_expiry <= now:
+                        del sessions[sid]
+                        expired_count += 1
+                    else:
+                        # Session was refreshed; re-push updated expiry to heap
+                        heapq.heappush(sessions_heap, (actual_expiry, sid))
+
+                if expired_count > 0:
+                    logger.info(f"Cleaned up {expired_count} expired sessions.")
         except asyncio.CancelledError:
             break
         except Exception as e:
@@ -54,7 +89,7 @@ async def cleanup_sessions():
 async def lifespan(app: FastAPI):
     # Startup
     logger.info("Starting ClauseGuard API...")
-    app.state.sessions = {}
+    app.state.sessions = sessions
     app.state.retrievers = {}
     cleanup_task = asyncio.create_task(cleanup_sessions())
     yield

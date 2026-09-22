@@ -5,6 +5,7 @@ Handles file upload with validation, triggers the full processing pipeline
 processed clause data.
 """
 
+import hashlib
 import logging
 import uuid
 from typing import Any
@@ -22,6 +23,9 @@ from backend.services.retriever import ClauseRetriever
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/documents", tags=["documents"])
+
+# Efficiency: In-memory content hash cache to avoid re-parsing & re-processing identical files
+_DOCUMENT_CONTENT_CACHE: dict[str, dict[str, Any]] = {}
 
 
 def _get_sessions(request: Request) -> dict[str, Any]:
@@ -63,10 +67,28 @@ async def upload_document(request: Request, file: UploadFile = File(...)):
         # Validate file type and size (security: magic bytes, not extension)
         file_type = validate_upload(file_bytes, file.filename or "")
 
-        # Run the full processing pipeline
-        pages, clauses, classification = await process_document(file_bytes, file_type)
+        # Efficiency: Compute SHA-256 hash to check if this exact file was already processed
+        content_hash = hashlib.sha256(file_bytes).hexdigest()
 
-        # Create session
+        if content_hash in _DOCUMENT_CONTENT_CACHE:
+            logger.info(f"Efficiency: Content-hash cache hit for SHA256 {content_hash[:8]}")
+            cached = _DOCUMENT_CONTENT_CACHE[content_hash]
+            pages = cached["pages"]
+            clauses = cached["clauses"]
+            classification = cached["classification"]
+            retriever = cached["retriever"]
+        else:
+            # Run the full processing pipeline
+            pages, clauses, classification = await process_document(file_bytes, file_type)
+            retriever = ClauseRetriever(clauses)
+            _DOCUMENT_CONTENT_CACHE[content_hash] = {
+                "pages": pages,
+                "clauses": clauses,
+                "classification": classification,
+                "retriever": retriever,
+            }
+
+        # Create session (always issue a unique session_id for independent session lifecycle)
         session_id = str(uuid.uuid4())
         session = DocumentSession(
             session_id=session_id,
@@ -80,9 +102,8 @@ async def upload_document(request: Request, file: UploadFile = File(...)):
         sessions = _get_sessions(request)
         sessions[session_id] = session
 
-        # Efficiency: Build TF-IDF index once at upload time, reuse for all queries
         retrievers = _get_retrievers(request)
-        retrievers[session_id] = ClauseRetriever(clauses)
+        retrievers[session_id] = retriever
 
         logger.info(f"Document uploaded: session={session_id}, type={classification.doc_type}, clauses={len(clauses)}")
 

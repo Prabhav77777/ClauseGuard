@@ -158,6 +158,52 @@ class TestPerformanceOptimizations:
         assert parse_count == 1  # Re-used cache, didn't re-parse
         assert pages1 == pages2
 
+    def test_upload_content_hash_cache_bypasses_pipeline(self, sample_pdf_bytes, monkeypatch):
+        """Verify uploading identical file twice uses content-hash cache and skips process_document."""
+        from fastapi.testclient import TestClient
+
+        from backend.api.documents import _DOCUMENT_CONTENT_CACHE
+        from backend.main import app
+        from backend.models.schemas import ClassificationResult, Clause, DocumentType
+
+        _DOCUMENT_CONTENT_CACHE.clear()
+
+        client = TestClient(app)
+        pipeline_call_count = 0
+
+        async def mock_process_document(file_bytes, file_type):
+            nonlocal pipeline_call_count
+            pipeline_call_count += 1
+            return (
+                [],
+                [Clause(id="clause_000", section="S1", page=1, text="Text")],
+                ClassificationResult(doc_type=DocumentType.EMPLOYMENT_AGREEMENT, confidence=0.99)
+            )
+
+        monkeypatch.setattr("backend.api.documents.process_document", mock_process_document)
+
+        # First upload: cache miss, triggers process_document
+        res1 = client.post(
+            "/api/documents/upload",
+            files={"file": ("contract.pdf", sample_pdf_bytes, "application/pdf")}
+        )
+        assert res1.status_code == 200
+        assert pipeline_call_count == 1
+        data1 = res1.json()
+
+        # Second upload with identical bytes: cache hit, skips process_document
+        res2 = client.post(
+            "/api/documents/upload",
+            files={"file": ("contract.pdf", sample_pdf_bytes, "application/pdf")}
+        )
+        assert res2.status_code == 200
+        assert pipeline_call_count == 1  # Did NOT increment!
+        data2 = res2.json()
+
+        # Verify distinct session_ids were generated for each upload
+        assert data1["session_id"] != data2["session_id"]
+        assert data1["total_clauses"] == data2["total_clauses"]
+
     def test_retriever_precision_recall_benchmark(self, sample_clauses):
         """Verify TF-IDF retrieval precision and recall exceed 90% target threshold."""
         retriever = ClauseRetriever(sample_clauses)
@@ -231,5 +277,77 @@ class TestPerformanceOptimizations:
 
         assert "active_1" in sessions
         assert "expired_1" not in sessions
+
+    def test_create_adaptive_batches(self):
+        """Verify adaptive page batching respects target_chars and max_pages limits."""
+        from backend.models.schemas import PageText
+        from backend.prompts.extraction import create_adaptive_batches
+
+        # Case 1: Empty pages list
+        assert create_adaptive_batches([]) == []
+
+        # Case 2: Single short page stays 1 batch
+        p1 = [PageText(page_number=1, text="Short text")]
+        b1 = create_adaptive_batches(p1, target_chars=8000, max_pages=10)
+        assert len(b1) == 1 and len(b1[0]) == 1
+
+        # Case 3: 12 small pages (100 chars each) capped at max_pages=10
+        p_many = [PageText(page_number=i, text="A" * 100) for i in range(1, 13)]
+        b_many = create_adaptive_batches(p_many, target_chars=8000, max_pages=10)
+        assert len(b_many) == 2
+        assert len(b_many[0]) == 10
+        assert len(b_many[1]) == 2
+
+        # Case 4: Pages totaling > target_chars split dynamically
+        p_large = [PageText(page_number=i, text="B" * 3500) for i in range(1, 4)]
+        b_large = create_adaptive_batches(p_large, target_chars=8000, max_pages=10)
+        assert len(b_large) == 2
+        assert len(b_large[0]) == 2  # 7,000 chars
+        assert len(b_large[1]) == 1  # 3,500 chars
+
+        # Case 5: Single huge page exceeding target_chars gets its own batch
+        p_huge = [PageText(page_number=1, text="C" * 12000)]
+        b_huge = create_adaptive_batches(p_huge, target_chars=8000, max_pages=10)
+        assert len(b_huge) == 1 and len(b_huge[0]) == 1
+
+    @pytest.mark.asyncio
+    async def test_min_heap_session_cleanup(self):
+        """Verify min-heap efficiently purges expired sessions while preserving active ones."""
+        import heapq
+
+        from backend.main import sessions, sessions_heap, sync_sessions_heap
+        from backend.models.schemas import DocumentSession
+
+        sessions.clear()
+        sessions_heap.clear()
+
+        now = time.time()
+        # Add 1 active session and 2 expired sessions
+        sessions["active"] = {"last_accessed": now, "session": DocumentSession(session_id="active")}
+        sessions["expired_old"] = {"last_accessed": now - 7200, "session": DocumentSession(session_id="expired_old")}
+        sessions["expired_recent"] = {"last_accessed": now - 3601, "session": DocumentSession(session_id="expired_recent")}
+
+        sync_sessions_heap()
+        assert len(sessions_heap) == 3
+
+        # Simulate min-heap cleanup pass
+        expired_count = 0
+        while sessions_heap and sessions_heap[0][0] <= now:
+            expiry, sid = heapq.heappop(sessions_heap)
+            data = sessions.get(sid)
+            if data is None:
+                continue
+            last_accessed = data.get("last_accessed", now) if isinstance(data, dict) else now
+            if last_accessed + 3600 <= now:
+                del sessions[sid]
+                expired_count += 1
+
+        assert expired_count == 2
+        assert "active" in sessions
+        assert "expired_old" not in sessions
+        assert "expired_recent" not in sessions
+        assert len(sessions_heap) == 1
+
+
 
 

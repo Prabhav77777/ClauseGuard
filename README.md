@@ -137,6 +137,9 @@ ClauseGuard operates on a 7-stage sequential pipeline:
 
 ## 6. Efficiency
 
+- **SHA-256 Content-Hash Document Cache**: Uploaded documents calculate a SHA-256 hash in `backend/api/documents.py`. Identical byte streams reuse extracted clauses, classification, and TF-IDF index while issuing a new isolated session ID, skipping re-parsing and re-processing completely ($O(1)$ lookup).
+- **Adaptive Page Batching**: `backend/prompts/extraction.py` dynamically groups pages by character count (~8,000 characters per batch, max 10 pages) via `create_adaptive_batches`, minimizing Gemini LLM call count for long sparse contracts while processing short 1-page documents in a single batch.
+- **Min-Heap $O(1)$ Peek / $O(\log N)$ Session Expiry**: `backend/main.py` uses a heap queue (`heapq`) sorted by expiration timestamp (`sessions_heap`), transforming session cleanup scans from $O(N)$ dictionary iterations to $O(1)$ head peeks and $O(\log N)$ pop operations.
 - **Concurrent Async Pipeline (`asyncio.gather`)**: Independent LLM operations (document classification + clause extraction, clause categorization + plain-English explanations) execute concurrently in parallel using `asyncio.gather`, reducing total processing latency by ~50%.
 - **O(1) In-Memory LLM & Query Result Caching**: `cachetools.TTLCache` caches LLM Q&A/scenario responses for 30 minutes, bypassing redundant Gemini API calls. `ClauseRetriever` caches TF-IDF query transforms and similarity scores in memory.
 - **SHA256 Content-Hash Parse Caching**: Re-uploads of identical document byte streams hit `_PARSE_CACHE` for instant O(1) page text retrieval.
@@ -153,13 +156,17 @@ ClauseGuard intentionally uses an in-memory `TfidfVectorizer` (with unigram + bi
 3. **Exact Verbatim Legal Matching**: Legal contracts rely heavily on precise statutory terms (e.g. *"liquidated damages"*, *"indemnification"*, *"probationary period"*) where exact keyword & phrase matches yield **100% precision/recall** on test benchmark suites without semantic drift.
 4. **Zero External API Cost**: Performs 100% local in-memory retrieval without additional embedding API token consumption.
 
+### Horizontal Scaling & Production Deployment Note
+
+While ClauseGuard uses high-performance in-memory caching and session state for single-instance simplicity and zero cold-start deployment, horizontal multi-instance production scaling is seamlessly achieved by replacing the in-memory `_DOCUMENT_CONTENT_CACHE` and `sessions` dict with Redis / Redis Cluster (or KeyDB) backed by `redis-py` or `aioredis`, providing shared session state and content hash deduplication across stateless FastAPI worker nodes.
+
 ### Benchmark Performance Numbers
 
 Automated performance benchmarks (`tests/test_performance.py`):
 - **Retrieval Precision / Recall**: **100% accuracy** across legal query test suites (exceeding 90% target threshold).
 - **Q&A Local Pipeline Overhead**: **< 1.0 ms** average latency per Q&A call (retrieval + validation guard execution).
 - **Leak Detection Throughput**: **< 2.5 ms** per 100,000 characters using pre-compiled regex patterns.
-- **Session Memory Cleanup**: Automatic 1-hour session TTL background task purges expired sessions to prevent memory leaks.
+- **Session Memory Cleanup**: Automatic 1-hour session TTL background task purges expired sessions via min-heap to prevent memory leaks.
 
 ### Pipeline Complexity Notes (Big-O Analysis)
 
@@ -181,7 +188,7 @@ Automated performance benchmarks (`tests/test_performance.py`):
 
 ## 7. Testing
 
-The repository contains **78 automated tests** covering API routes, parser, extraction, Q&A grounding, security, performance concurrency, comparison, end-to-end integration, and accessibility compliance with 100% pass rate.
+The repository contains **80 automated tests** covering API routes, parser, extraction, Q&A grounding, security, performance concurrency, comparison, end-to-end integration, and accessibility compliance with 100% pass rate.
 
 ### Running the Test Suite
 

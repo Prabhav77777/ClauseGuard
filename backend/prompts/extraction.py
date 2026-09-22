@@ -21,8 +21,40 @@ from backend.security.prompt_guard import get_data_boundary_instruction, wrap_do
 
 logger = logging.getLogger(__name__)
 
-# Batch size for page processing — balances quality vs. API call count
-PAGES_PER_BATCH = 5
+# Default adaptive batching target limits
+TARGET_CHARS_PER_BATCH = 8000
+MAX_PAGES_PER_BATCH = 10
+
+
+def create_adaptive_batches(
+    pages: list[PageText], target_chars: int = TARGET_CHARS_PER_BATCH, max_pages: int = MAX_PAGES_PER_BATCH
+) -> list[list[PageText]]:
+    """Group pages dynamically by character count and max page limit.
+
+    Target ~8,000 characters per batch or max 10 pages per batch to balance
+    extraction quality against LLM API calls.
+    """
+    if not pages:
+        return []
+
+    batches: list[list[PageText]] = []
+    current_batch: list[PageText] = []
+    current_chars = 0
+
+    for page in pages:
+        page_len = len(page.text)
+        if current_batch and (current_chars + page_len > target_chars or len(current_batch) >= max_pages):
+            batches.append(current_batch)
+            current_batch = [page]
+            current_chars = page_len
+        else:
+            current_batch.append(page)
+            current_chars += page_len
+
+    if current_batch:
+        batches.append(current_batch)
+
+    return batches
 
 
 async def classify_document(pages: list[PageText]) -> ClassificationResult:
@@ -56,14 +88,14 @@ You must select from this exact list. If uncertain, choose 'unknown'."""
 async def extract_clauses_from_pages(pages: list[PageText]) -> list[Clause]:
     """Extract distinct clauses from document pages.
 
-    Processes pages in batches to balance extraction quality against API calls.
+    Processes pages in adaptive batches to balance extraction quality against API calls.
     Each clause preserves verbatim text (no paraphrasing) with page reference.
     """
     all_clauses: list[Clause] = []
     clause_counter = 0
 
-    for batch_start in range(0, len(pages), PAGES_PER_BATCH):
-        batch = pages[batch_start:batch_start + PAGES_PER_BATCH]
+    batches = create_adaptive_batches(pages)
+    for batch in batches:
 
         batch_text = ""
         for page in batch:
