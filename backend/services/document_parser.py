@@ -9,14 +9,15 @@ Efficiency:
 - Single-pass text extraction with minimal memory allocation.
 """
 
-import io
 import hashlib
+import io
 import logging
+
 from fastapi import HTTPException, status
 from starlette.concurrency import run_in_threadpool
 
 from backend.models.schemas import PageText
-from backend.security.validation import validate_page_count, validate_character_count
+from backend.security.validation import validate_character_count, validate_page_count
 
 logger = logging.getLogger(__name__)
 
@@ -27,15 +28,15 @@ _PARSE_CACHE: dict[str, list[PageText]] = {}
 def _parse_pdf_sync(file_bytes: bytes) -> list[PageText]:
     """Extract text from PDF with page numbers. Runs in thread pool."""
     import pymupdf  # Import inside function to keep module import lightweight
-    
+
     try:
         doc = pymupdf.open(stream=file_bytes, filetype="pdf")
-    except Exception as e:
+    except Exception:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Failed to parse PDF: file may be corrupted or password-protected"
+            detail="Failed to parse PDF: file may be corrupted or password-protected"
         )
-    
+
     try:
         pages = []
         for page_num in range(len(doc)):
@@ -51,15 +52,15 @@ def _parse_pdf_sync(file_bytes: bytes) -> list[PageText]:
 def _parse_docx_sync(file_bytes: bytes) -> list[PageText]:
     """Extract text from DOCX with estimated page numbers."""
     import docx
-    
+
     try:
         doc = docx.Document(io.BytesIO(file_bytes))
-    except Exception as e:
+    except Exception:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Failed to parse DOCX: file may be corrupted"
+            detail="Failed to parse DOCX: file may be corrupted"
         )
-    
+
     all_paragraphs = [p.text for p in doc.paragraphs if p.text.strip()]
     for table in doc.tables:
         for row in table.rows:
@@ -67,20 +68,20 @@ def _parse_docx_sync(file_bytes: bytes) -> list[PageText]:
                 text = cell.text.strip()
                 if text:
                     all_paragraphs.append(text)
-    
+
     if not all_paragraphs:
         return []
-    
+
     CHARS_PER_PAGE = 3000
     pages = []
     current_page_text = []
     current_char_count = 0
     current_page_num = 1
-    
+
     for para in all_paragraphs:
         current_page_text.append(para)
         current_char_count += len(para)
-        
+
         if current_char_count >= CHARS_PER_PAGE:
             pages.append(PageText(
                 page_number=current_page_num,
@@ -89,19 +90,19 @@ def _parse_docx_sync(file_bytes: bytes) -> list[PageText]:
             current_page_text = []
             current_char_count = 0
             current_page_num += 1
-    
+
     if current_page_text:
         pages.append(PageText(
             page_number=current_page_num,
             text="\n\n".join(current_page_text)
         ))
-    
+
     return pages
 
 
 async def parse_document(file_bytes: bytes, file_type: str) -> list[PageText]:
     """Parse a document into page-indexed text chunks with content hash caching.
-    
+
     Efficiency: Checks SHA256 content hash cache for O(1) instant return.
     Runs CPU-bound parsing in a thread pool to avoid blocking the event loop.
     """
@@ -119,17 +120,17 @@ async def parse_document(file_bytes: bytes, file_type: str) -> list[PageText]:
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Unsupported file type: {file_type}"
         )
-    
+
     if not pages:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="No text could be extracted from the document. It may be empty, image-only, or corrupted."
         )
-    
+
     validate_page_count(len(pages))
     total_text = "\n".join(p.text for p in pages)
     validate_character_count(total_text)
-    
+
     _PARSE_CACHE[content_hash] = pages
     logger.info(f"Parsed document: {len(pages)} pages, {len(total_text)} characters")
     return pages

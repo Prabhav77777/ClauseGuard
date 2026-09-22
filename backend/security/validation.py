@@ -7,6 +7,7 @@ document content reaches the parser or LLM.
 
 import io
 import zipfile
+
 from fastapi import HTTPException, status
 
 from backend.config import settings
@@ -26,9 +27,35 @@ def validate_file_size(file_bytes: bytes) -> None:
         )
 
 
+MAX_ZIP_RATIO = 100.0  # Max uncompressed-to-compressed size ratio
+MAX_UNCOMPRESSED_BYTES = 25 * 1024 * 1024  # 25 MB max uncompressed ceiling
+
+
+def validate_zip_ratio(file_bytes: bytes) -> None:
+    """Protect against zip bomb / XML expansion DoS attacks in DOCX files.
+
+    Security & Efficiency: Rejects zip archives with extreme compression ratios
+    (> 100:1) or total uncompressed payload sizes (> 25MB) before parsing XML.
+    """
+    if file_bytes[:4] == ZIP_MAGIC:
+        try:
+            with zipfile.ZipFile(io.BytesIO(file_bytes)) as zf:
+                total_uncompressed = sum(info.file_size for info in zf.infolist())
+                total_compressed = sum(info.compress_size for info in zf.infolist()) or 1
+                ratio = total_uncompressed / total_compressed
+
+                if ratio > MAX_ZIP_RATIO or total_uncompressed > MAX_UNCOMPRESSED_BYTES:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail="File rejected: Zip bomb or excessive XML compression ratio detected."
+                    )
+        except zipfile.BadZipFile:
+            pass
+
+
 def detect_file_type(file_bytes: bytes) -> str:
     """Detect file type by magic bytes. Returns 'pdf' or 'docx'.
-    
+
     Security: We check actual file content, not the user-provided extension,
     to prevent disguised file attacks.
     """
@@ -37,24 +64,24 @@ def detect_file_type(file_bytes: bytes) -> str:
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="File is too small or corrupted"
         )
-    
+
     # Check PDF signature
     if file_bytes[:4] == PDF_MAGIC:
         return "pdf"
-    
+
     # Check DOCX: must be a valid ZIP containing word/document.xml
     if file_bytes[:4] == ZIP_MAGIC:
+        validate_zip_ratio(file_bytes)
         try:
             with zipfile.ZipFile(io.BytesIO(file_bytes)) as zf:
                 names = zf.namelist()
-                # Efficiency: Just checking the zip namelist is faster than parsing XML
                 if "[Content_Types].xml" in names and any(
                     n.startswith("word/") for n in names
                 ):
                     return "docx"
         except zipfile.BadZipFile:
             pass
-    
+
     raise HTTPException(
         status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
         detail="Unsupported file format. Only valid PDF and DOCX files are accepted. "
@@ -82,7 +109,7 @@ def validate_character_count(text: str) -> None:
 
 def validate_upload(file_bytes: bytes, filename: str) -> str:
     """Run all upload validations. Returns detected file type ('pdf' or 'docx').
-    
+
     Validation order (fail-fast):
     1. File size (cheapest check)
     2. Magic byte detection (determines file type)
@@ -90,7 +117,7 @@ def validate_upload(file_bytes: bytes, filename: str) -> str:
     """
     validate_file_size(file_bytes)
     file_type = detect_file_type(file_bytes)
-    
+
     # Log extension mismatch but don't block (magic bytes are authoritative)
     if filename:
         ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
@@ -98,5 +125,5 @@ def validate_upload(file_bytes: bytes, filename: str) -> str:
             pass  # Could log warning; magic bytes are authoritative
         elif file_type == "docx" and ext != "docx":
             pass  # Could log warning; magic bytes are authoritative
-    
+
     return file_type

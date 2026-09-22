@@ -5,11 +5,13 @@ Tests:
 10. Every returned clause ID structurally exists in the parsed clause set
 """
 
-import pytest
 
 from backend.models.schemas import (
-    Clause, ClauseCategory, ExtractionResult, 
-    BatchCategorizationResult, CategorizationResult,
+    BatchCategorizationResult,
+    CategorizationResult,
+    Clause,
+    ClauseCategory,
+    ExtractionResult,
 )
 
 

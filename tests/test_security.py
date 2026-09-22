@@ -5,20 +5,19 @@ Tests:
 8. No API key appears in logs or error output
 """
 
-import re
 import logging
+
 import pytest
 from fastapi.testclient import TestClient
 
 from backend.main import app
 from backend.security.prompt_guard import (
-    wrap_document_content,
     get_data_boundary_instruction,
     sanitize_for_html,
     strip_system_prompt_leaks,
     validate_clause_ids_exist,
+    wrap_document_content,
 )
-from backend.security.validation import detect_file_type
 
 
 class TestPromptInjectionDefense:
@@ -119,7 +118,6 @@ class TestApiKeySafety:
 
     def test_no_api_key_in_error_logs(self, caplog):
         """Error logging doesn't include API keys."""
-        from backend.config import settings
         logger = logging.getLogger("test")
         with caplog.at_level(logging.ERROR):
             logger.error("Failed to call API: connection timeout")
@@ -131,7 +129,7 @@ class TestSecurityHeaders:
     """Test HTTP security response headers."""
 
     def test_security_headers_present(self):
-        """Verify X-Content-Type-Options, X-Frame-Options, X-XSS-Protection, Referrer-Policy."""
+        """Verify X-Content-Type-Options, X-Frame-Options, X-XSS-Protection, Referrer-Policy, and CSP headers."""
         client = TestClient(app)
         response = client.get("/api/health")
         assert response.status_code == 200
@@ -139,9 +137,61 @@ class TestSecurityHeaders:
         assert response.headers.get("X-Frame-Options") == "DENY"
         assert response.headers.get("X-XSS-Protection") == "1; mode=block"
         assert response.headers.get("Referrer-Policy") == "strict-origin-when-cross-origin"
+        assert "default-src 'self'" in response.headers.get("Content-Security-Policy", "")
 
     def test_gzip_compression_header(self):
         """Verify response compression for responses over minimum size threshold."""
         client = TestClient(app)
         response = client.get("/api/health", headers={"Accept-Encoding": "gzip"})
         assert response.status_code == 200
+
+
+class TestZipBombDefense:
+    """Test zip bomb and XML expansion attack rejection."""
+
+    def test_reject_zip_bomb_high_ratio(self):
+        """Zip archive with extreme compression ratio is rejected before XML parsing."""
+        import io
+        import zipfile
+
+        from fastapi import HTTPException
+
+        from backend.security.validation import validate_zip_ratio
+
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, 'w', compression=zipfile.ZIP_DEFLATED) as zf:
+            # Write 5MB of repeated zeroes
+            zf.writestr('word/document.xml', b'0' * (5 * 1024 * 1024))
+
+        zip_bytes = buf.getvalue()
+        with pytest.raises(HTTPException) as exc_info:
+            validate_zip_ratio(zip_bytes)
+
+        assert exc_info.value.status_code == 400
+        assert "Zip bomb" in exc_info.value.detail
+
+
+class TestGenericErrorHandler:
+    """Test generic 500 exception handler prevents stack trace leakage."""
+
+    def test_unhandled_exception_masks_stack_trace(self, monkeypatch):
+        """Unhandled internal errors return 500 with generic message and no stack trace."""
+        client = TestClient(app)
+
+        # Mock process_document in documents endpoint module to raise an unhandled ValueError
+        def mock_error(*args, **kwargs):
+            raise ValueError("Secret internal path D:\\secret\\file.py line 42")
+
+        monkeypatch.setattr("backend.api.documents.process_document", mock_error)
+
+        response = client.post(
+            "/api/documents/upload",
+            files={"file": ("test.pdf", b"%PDF-1.4 mock content text for testing", "application/pdf")}
+        )
+
+        assert response.status_code == 500
+        data = response.json()
+        assert data == {"detail": "An internal server error occurred while processing the document."}
+        assert "Traceback" not in response.text
+        assert "D:\\secret" not in response.text
+

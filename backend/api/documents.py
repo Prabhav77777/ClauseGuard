@@ -5,16 +5,17 @@ Handles file upload with validation, triggers the full processing pipeline
 processed clause data.
 """
 
-import uuid
 import logging
-from fastapi import APIRouter, File, UploadFile, HTTPException, Request, status
+import uuid
+
+from fastapi import APIRouter, File, HTTPException, Request, UploadFile, status
 from fastapi.responses import PlainTextResponse
 
-from backend.models.schemas import UploadResponse, Clause, DocumentSession
+from backend.models.schemas import Clause, DocumentSession, UploadResponse
 from backend.security.validation import validate_upload
+from backend.services.brief_generator import generate_brief
 from backend.services.clause_extractor import process_document
 from backend.services.retriever import ClauseRetriever
-from backend.services.brief_generator import generate_brief
 
 logger = logging.getLogger(__name__)
 
@@ -38,28 +39,28 @@ def _get_retrievers(request: Request) -> dict:
 @router.post("/upload", response_model=UploadResponse)
 async def upload_document(request: Request, file: UploadFile = File(...)):
     """Upload and process a legal document.
-    
+
     Validates the file (magic bytes, size), then runs the full pipeline:
     parse -> classify -> extract -> categorize -> explain.
-    
+
     Returns a session ID and the full list of processed clauses.
     """
     try:
         # Read file bytes with size check
         file_bytes = await file.read()
-        
+
         if not file_bytes:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Uploaded file is empty"
             )
-        
+
         # Validate file type and size (security: magic bytes, not extension)
         file_type = validate_upload(file_bytes, file.filename or "")
-        
+
         # Run the full processing pipeline
         pages, clauses, classification = await process_document(file_bytes, file_type)
-        
+
         # Create session
         session_id = str(uuid.uuid4())
         session = DocumentSession(
@@ -69,17 +70,17 @@ async def upload_document(request: Request, file: UploadFile = File(...)):
             clauses=clauses,
             raw_pages=pages,
         )
-        
+
         # Store session and build retriever
         sessions = _get_sessions(request)
         sessions[session_id] = session
-        
+
         # Efficiency: Build TF-IDF index once at upload time, reuse for all queries
         retrievers = _get_retrievers(request)
         retrievers[session_id] = ClauseRetriever(clauses)
-        
+
         logger.info(f"Document uploaded: session={session_id}, type={classification.doc_type}, clauses={len(clauses)}")
-        
+
         return UploadResponse(
             session_id=session_id,
             filename=file.filename or "unknown",
@@ -100,7 +101,7 @@ async def upload_document(request: Request, file: UploadFile = File(...)):
             )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error processing document: {err_str}"
+            detail="An internal server error occurred while processing the document."
         )
     finally:
         await file.close()
@@ -129,11 +130,11 @@ async def get_clause(session_id: str, clause_id: str, request: Request):
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Session not found"
         )
-    
+
     for clause in session.clauses:
         if clause.id == clause_id:
             return clause
-    
+
     raise HTTPException(
         status_code=status.HTTP_404_NOT_FOUND,
         detail=f"Clause '{clause_id}' not found"

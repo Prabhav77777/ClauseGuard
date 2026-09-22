@@ -6,12 +6,14 @@ Tests:
 - Pre-compiled regex leak scanning performance
 """
 
-import time
-import pytest
 import asyncio
-from backend.models.schemas import Clause, ClauseCategory, PageText
-from backend.services.retriever import ClauseRetriever
+import time
+
+import pytest
+
+from backend.models.schemas import Clause, ClauseCategory
 from backend.security.prompt_guard import strip_system_prompt_leaks
+from backend.services.retriever import ClauseRetriever
 
 
 class TestPerformanceOptimizations:
@@ -71,7 +73,7 @@ class TestPerformanceOptimizations:
             execution_order.append("categorize_start")
             await asyncio.sleep(0.05)
             execution_order.append("categorize_end")
-            from backend.models.schemas import CategorizationResult, ClauseCategory
+            from backend.models.schemas import CategorizationResult
             return [CategorizationResult(clause_id="clause_000", category=ClauseCategory.COMPENSATION)]
 
         async def mock_explain(clauses):
@@ -93,3 +95,66 @@ class TestPerformanceOptimizations:
         # Check that starts occurred before ends (demonstrating parallel execution)
         assert "classify_start" in execution_order and "extract_start" in execution_order
         assert execution_order.index("extract_start") < execution_order.index("classify_end")
+
+    @pytest.mark.asyncio
+    async def test_ttl_cache_deduplicates_llm_calls(self, sample_clauses, monkeypatch):
+        """Verify duplicate questions use TTLCache and avoid invoking Gemini prompt functions a second time."""
+        from backend.models.schemas import CertaintyLevel, QAResponse
+        from backend.services.legal_analyzer import _LLM_RESPONSE_CACHE, ask_question_about_document
+
+        _LLM_RESPONSE_CACHE.clear()
+
+        call_count = 0
+
+        async def mock_answer_question(q, clauses):
+            nonlocal call_count
+            call_count += 1
+            return QAResponse(
+                answer="The probation period is 3 months.",
+                sources=["clause_000"],
+                certainty=CertaintyLevel.STATED,
+                stated="The probation period is 3 months.",
+                interpreted="",
+                not_established="",
+                lawyer_question=None
+            )
+
+        monkeypatch.setattr("backend.services.legal_analyzer.answer_question", mock_answer_question)
+
+        retriever = ClauseRetriever(sample_clauses)
+        question = "What is the probation period?"
+
+        # First call: cache miss, triggers answer_question
+        res1 = await ask_question_about_document(question, sample_clauses, retriever)
+        assert call_count == 1
+        assert res1.answer == "The probation period is 3 months."
+
+        # Second call: cache hit, bypasses answer_question
+        res2 = await ask_question_about_document(question, sample_clauses, retriever)
+        assert call_count == 1  # Did NOT increment
+        assert res2.answer == res1.answer
+
+    @pytest.mark.asyncio
+    async def test_sha256_parse_cache_deduplication(self, sample_pdf_bytes, monkeypatch):
+        """Verify identical document bytes use SHA256 parse cache without re-parsing."""
+        from backend.services.document_parser import _PARSE_CACHE, parse_document
+
+        _PARSE_CACHE.clear()
+
+        parse_count = 0
+        original_parse_pdf_sync = __import__("backend.services.document_parser", fromlist=["_parse_pdf_sync"])._parse_pdf_sync
+
+        def mock_parse_sync(file_bytes):
+            nonlocal parse_count
+            parse_count += 1
+            return original_parse_pdf_sync(file_bytes)
+
+        monkeypatch.setattr("backend.services.document_parser._parse_pdf_sync", mock_parse_sync)
+
+        pages1 = await parse_document(sample_pdf_bytes, "pdf")
+        assert parse_count == 1
+
+        pages2 = await parse_document(sample_pdf_bytes, "pdf")
+        assert parse_count == 1  # Re-used cache, didn't re-parse
+        assert pages1 == pages2
+

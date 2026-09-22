@@ -6,36 +6,38 @@ not during module import, to allow tests to run without a key.
 """
 
 import os
+from functools import lru_cache
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
     """ClauseGuard application settings.
-    
+
     Loaded from environment variables or .env file.
     See .env.example for documentation of each setting.
     """
     # Gemini API key (supports GEMINI_API_KEY or GOOGLE_API_KEY env vars)
     GEMINI_API_KEY: str = ""
-    
+
     # Document limits
     MAX_FILE_SIZE_MB: int = 10
     MAX_PAGES: int = 50
     MAX_CHARACTERS: int = 500000
-    
+
     # Rate limiting
     RATE_LIMIT_REQUESTS: int = 10
     RATE_LIMIT_PERIOD: str = "minute"
-    
+
     # Session management
     SESSION_TTL_SECONDS: int = 3600
-    
+
     # Gemini model selection
     GEMINI_MODEL: str = "gemini-2.5-flash"
-    
+
     # Logging — only metadata, never document content
     LOG_LEVEL: str = "INFO"
-    
+
     # CORS origins for frontend
     CORS_ORIGINS: list[str] = [
         "http://localhost:5173",
@@ -70,13 +72,10 @@ class Settings(BaseSettings):
         return self.__repr__()
 
 
-from functools import lru_cache
-
-
 @lru_cache()
 def get_settings() -> Settings:
     """Retrieve cached application settings instance.
-    
+
     Efficiency: @lru_cache guarantees settings are read from environment once.
     """
     return Settings()

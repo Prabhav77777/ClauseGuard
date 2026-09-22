@@ -118,8 +118,10 @@ ClauseGuard operates on a 7-stage sequential pipeline:
 
 ## 5. Security
 
-- **HTTP Security Response Headers**: Enforces `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `X-XSS-Protection: 1; mode=block`, and `Referrer-Policy: strict-origin-when-cross-origin` on all API responses.
-- **Magic Byte Validation**: Verifies binary signatures (`%PDF-`, `PK\x03\x04` ZIP structure with `word/document.xml`), not user-supplied file extensions.
+- **Comprehensive Security Policy**: Detailed in [`SECURITY.md`](file:///d:/Desktop/Desktop/ClauseGuard/SECURITY.md).
+- **HTTP Security Response Headers**: Enforces `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `X-XSS-Protection: 1; mode=block`, `Referrer-Policy: strict-origin-when-cross-origin`, and `Content-Security-Policy: default-src 'self'...` on all API responses.
+- **Magic Byte & Zip Bomb Defense**: Verifies binary signatures (`%PDF-`, `PK\x03\x04` ZIP structure with `word/document.xml`), not user-supplied file extensions, and rejects zip bombs (compression ratio > 100:1 or uncompressed > 25MB) prior to XML parsing.
+- **Generic 500 Error Sanitization**: Prevents internal file path and stack trace disclosure in error responses.
 - **Delimiter Injection Defense**: Wraps document content in `<DOCUMENT_DATA_nonce>` tags using a cryptographic 8-character hex nonce per request.
 - **Explicit Prompt Hierarchy**: System prompt explicitly instructs the LLM that content inside delimiters is untrusted DATA.
 - **Input & Output Sanitization**: HTML text rendered in UI is sanitized using `bleach` to prevent XSS.
@@ -132,14 +134,23 @@ ClauseGuard operates on a 7-stage sequential pipeline:
 ## 6. Efficiency
 
 - **Concurrent Async Pipeline (`asyncio.gather`)**: Independent LLM operations (document classification + clause extraction, clause categorization + plain-English explanations) execute concurrently in parallel using `asyncio.gather`, reducing total processing latency by ~50%.
-- **O(1) In-Memory Query Result Caching**: `ClauseRetriever` caches TF-IDF query transforms and similarity scores in memory, returning repeat user questions instantly without re-computing cosine matrix dot products.
-- **Parse Once, Cache Session**: Documents are parsed exactly once upon upload. The structured clause array and TF-IDF matrix are cached in memory for the session lifetime.
+- **O(1) In-Memory LLM & Query Result Caching**: `cachetools.TTLCache` caches LLM Q&A/scenario responses for 30 minutes, bypassing redundant Gemini API calls. `ClauseRetriever` caches TF-IDF query transforms and similarity scores in memory.
+- **SHA256 Content-Hash Parse Caching**: Re-uploads of identical document byte streams hit `_PARSE_CACHE` for instant O(1) page text retrieval.
 - **Retrieval-First Architecture**: Q&A and Scenario prompts receive ONLY top-k retrieved clauses (never full document text), drastically reducing token cost and latency.
 - **Async Non-Blocking I/O**: FastAPI endpoints use `async def`; CPU-bound PDF/DOCX parsing runs in worker thread pools (`run_in_threadpool`).
 - **GZip Response Compression**: Compresses HTTP response payloads larger than 500 bytes for network bandwidth efficiency.
 - **Pre-Compiled Regex & Fast Leak Detection**: System prompt leak patterns and security filters use module-level pre-compiled regex objects for O(N) linear-time text scanning.
 - **In-Memory TF-IDF**: Uses `scikit-learn` TF-IDF vectorizer fitted once per session — zero external vector DB overhead or embedding API costs.
-- **Batched Processing**: Clause extraction and explanations process pages in batches (e.g. 5 pages per batch) to minimize API call counts.
+
+### Pipeline Complexity Notes (Big-O Analysis)
+
+| Stage | Operation | Time Complexity | Space Complexity | Optimizations |
+|---|---|---|---|---|
+| **Parse** | Text Extraction | $O(P)$ where $P$ = pages | $O(T)$ where $T$ = chars | SHA256 content-hash cache $O(1)$, threadpool execution |
+| **Index** | TF-IDF Matrix Build | $O(C \cdot W)$ where $C$ = clauses, $W$ = words | $O(C \cdot V)$ where $V$ = vocabulary | Calculated once at upload, reused for session |
+| **Retrieve**| Cosine Similarity | $O(Q \cdot V + C)$ where $Q$ = query words | $O(k)$ top-k results | Cached matrix transform, returns top-k only |
+| **Analyze** | LLM Grounded Q&A | $O(1)$ cache hit / $O(k)$ LLM call | $O(k)$ context tokens | `TTLCache` LRU deduplication, top-k prompt context |
+| **Sanitize**| Regex Leak Scan | $O(L)$ where $L$ = response length | $O(L)$ | Pre-compiled regex patterns, linear scan |
 
 ### What Was Intentionally NOT Built & Why
 
@@ -151,7 +162,7 @@ ClauseGuard operates on a 7-stage sequential pipeline:
 
 ## 7. Testing
 
-The repository contains 56 automated tests covering parser, extraction, Q&A grounding, security, performance concurrency, comparison, and brief generation.
+The repository contains **71 automated tests** covering API routes, parser, extraction, Q&A grounding, security, performance concurrency, comparison, and brief generation with 100% pass rate.
 
 ### Running the Test Suite
 
@@ -160,6 +171,7 @@ The repository contains 56 automated tests covering parser, extraction, Q&A grou
 pytest -v
 
 # Run specific test modules
+pytest tests/test_api.py -v
 pytest tests/test_performance.py -v
 pytest tests/test_security.py -v
 pytest tests/test_qa_grounding.py -v
@@ -167,8 +179,9 @@ pytest tests/test_qa_grounding.py -v
 
 ### Test Coverage Highlights
 
-- `test_performance.py`: Pipeline concurrency (`asyncio.gather`), in-memory TF-IDF query cache hit latency, pre-compiled regex benchmark.
-- `test_security.py`: HTTP security headers (`X-Frame-Options`, `X-Content-Type-Options`), GZip response compression, prompt injection containment, delimiter nonce isolation, XSS HTML sanitization, system prompt leak scrubbing, API key safety.
+- `test_api.py`: 11 full integration tests verifying health checks, upload validation, non-existent sessions, brief generation, and chat endpoints.
+- `test_performance.py`: Pipeline concurrency (`asyncio.gather`), in-memory TF-IDF query cache hit latency, TTLCache duplicate Q&A bypass, SHA256 parse cache, pre-compiled regex benchmark.
+- `test_security.py`: HTTP security headers (`Content-Security-Policy`, `X-Frame-Options`, `X-Content-Type-Options`), GZip response compression, zip-bomb rejection, generic 500 error sanitization, prompt injection containment, delimiter nonce isolation, XSS HTML sanitization, system prompt leak scrubbing, API key safety.
 - `test_qa_grounding.py`: TF-IDF retrieval accuracy, certainty tag logic, final validation guard enforcement, fabricated clause ID downgrade.
 - `test_extraction.py`: Pydantic schema validation for all 15+ models, category enum coverage, sequential ID structure.
 - `test_comparison.py`: Added/Removed/Modified materiality classification schemas, Lawyer Prep Brief Markdown generation.

@@ -9,11 +9,11 @@ import pytest
 from fastapi import HTTPException
 
 from backend.security.validation import (
-    validate_file_size,
     detect_file_type,
-    validate_upload,
-    validate_page_count,
     validate_character_count,
+    validate_file_size,
+    validate_page_count,
+    validate_upload,
 )
 
 

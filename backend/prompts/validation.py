@@ -6,15 +6,22 @@ This module implements two validation steps:
 """
 
 import logging
+
 from backend.models.schemas import (
-    Clause, QAResponse, ScenarioResponse, ValidationResult,
-    FinalValidationResult, CertaintyLevel
-)
-from backend.security.prompt_guard import (
-    wrap_document_content, get_data_boundary_instruction,
-    strip_system_prompt_leaks, validate_clause_ids_exist
+    CertaintyLevel,
+    Clause,
+    FinalValidationResult,
+    QAResponse,
+    ScenarioResponse,
+    ValidationResult,
 )
 from backend.prompts.gemini_client import call_gemini_structured
+from backend.security.prompt_guard import (
+    get_data_boundary_instruction,
+    strip_system_prompt_leaks,
+    validate_clause_ids_exist,
+    wrap_document_content,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -28,13 +35,13 @@ async def validate_uncertainty(
             is_supported=False,
             notes="No source clauses provided — answer cannot be validated."
         )
-    
+
     clauses_text = "\n".join(
         f"[{c.id}]: {c.text}" for c in source_clauses
     )
     wrapped_clauses, nonce = wrap_document_content(clauses_text)
     boundary_instruction = get_data_boundary_instruction(nonce)
-    
+
     system_prompt = f"""You are a fact-checking system. Your job is to verify whether an answer is supported by source clauses.
 
 {boundary_instruction}
@@ -59,7 +66,7 @@ def validate_final_response(
     all_clauses: list[Clause]
 ) -> FinalValidationResult:
     """Final validation guard — runs BEFORE returning any response to the user.
-    
+
     This is a GENUINE guard, not a no-op. It performs:
     1. Clause ID existence check — removes references to non-existent clauses
     2. System prompt leak detection — strips leaked prompt content
@@ -67,7 +74,7 @@ def validate_final_response(
     """
     valid_ids = {c.id for c in all_clauses}
     corrections_made = False
-    
+
     if isinstance(response, QAResponse):
         # 1. Validate cited clause IDs exist
         valid_sources = validate_clause_ids_exist(response.sources, valid_ids)
@@ -78,7 +85,7 @@ def validate_final_response(
             )
             response.sources = valid_sources
             corrections_made = True
-        
+
         # 2. If no valid sources remain, downgrade to NOT_ESTABLISHED
         if not response.sources and response.certainty != CertaintyLevel.NOT_ESTABLISHED:
             response.certainty = CertaintyLevel.NOT_ESTABLISHED
@@ -86,7 +93,7 @@ def validate_final_response(
                 response.not_established or ""
             ) + " [Note: No valid source clauses could be verified for this answer.]"
             corrections_made = True
-        
+
         # 3. Strip system prompt leaks from all text fields
         response.answer = strip_system_prompt_leaks(response.answer)
         response.stated = strip_system_prompt_leaks(response.stated)
@@ -94,24 +101,24 @@ def validate_final_response(
         response.not_established = strip_system_prompt_leaks(response.not_established)
         if response.lawyer_question:
             response.lawyer_question = strip_system_prompt_leaks(response.lawyer_question)
-    
+
     elif isinstance(response, ScenarioResponse):
         # 1. Validate cited clause IDs
         valid_clauses = validate_clause_ids_exist(response.relevant_clauses, valid_ids)
         if len(valid_clauses) != len(response.relevant_clauses):
             response.relevant_clauses = valid_clauses
             corrections_made = True
-        
+
         # 2. Strip system prompt leaks
         response.what_document_says = strip_system_prompt_leaks(response.what_document_says)
         response.potential_implication = strip_system_prompt_leaks(response.potential_implication)
         response.unclear = strip_system_prompt_leaks(response.unclear)
         response.lawyer_question = strip_system_prompt_leaks(response.lawyer_question)
-    
+
     if corrections_made:
         return FinalValidationResult(
             passed=False,
             corrected_response=response.model_dump()
         )
-    
+
     return FinalValidationResult(passed=True, corrected_response=None)

@@ -6,9 +6,10 @@ and stated justification.
 """
 
 import logging
-from backend.models.schemas import Clause, ComparisonItem, ComparisonResult
-from backend.security.prompt_guard import wrap_document_content, get_data_boundary_instruction
+
+from backend.models.schemas import Clause, ComparisonResult
 from backend.prompts.gemini_client import call_gemini_structured
+from backend.security.prompt_guard import get_data_boundary_instruction, wrap_document_content
 
 logger = logging.getLogger(__name__)
 
@@ -17,7 +18,7 @@ async def compare_documents(
     clauses_doc1: list[Clause], clauses_doc2: list[Clause]
 ) -> ComparisonResult:
     """Compare clauses between two documents.
-    
+
     Identifies added, removed, and modified clauses with materiality
     classification and justification.
     """
@@ -27,11 +28,11 @@ async def compare_documents(
     doc2_text = "\n".join(
         f"[DOC2 - {c.id}] {c.section}: {c.text}" for c in clauses_doc2
     )
-    
+
     combined = f"DOCUMENT 1 CLAUSES:\n{doc1_text}\n\nDOCUMENT 2 CLAUSES:\n{doc2_text}"
     wrapped_text, nonce = wrap_document_content(combined)
     boundary_instruction = get_data_boundary_instruction(nonce)
-    
+
     system_prompt = f"""You are a legal document comparison system. Compare clauses between two versions of a document.
 
 {boundary_instruction}

@@ -8,11 +8,16 @@ quality against API call count. One batch = one LLM call.
 """
 
 import logging
+
 from backend.models.schemas import (
-    PageText, Clause, ExtractionResult, ClassificationResult, DocumentType
+    ClassificationResult,
+    Clause,
+    DocumentType,
+    ExtractionResult,
+    PageText,
 )
-from backend.security.prompt_guard import wrap_document_content, get_data_boundary_instruction
 from backend.prompts.gemini_client import call_gemini_structured
+from backend.security.prompt_guard import get_data_boundary_instruction, wrap_document_content
 
 logger = logging.getLogger(__name__)
 
@@ -22,14 +27,14 @@ PAGES_PER_BATCH = 5
 
 async def classify_document(pages: list[PageText]) -> ClassificationResult:
     """Classify the document type from sampled text.
-    
+
     Uses the first few pages to determine document type (employment agreement,
     lease, NDA, etc.). Selects from a fixed enum or 'unknown'.
     """
     sample_text = "\n\n".join(p.text for p in pages[:2])
     wrapped_text, nonce = wrap_document_content(sample_text)
     boundary_instruction = get_data_boundary_instruction(nonce)
-    
+
     system_prompt = f"""You are a document classification system. Your task is to identify the type of legal document.
 
 {boundary_instruction}
@@ -50,23 +55,23 @@ You must select from this exact list. If uncertain, choose 'unknown'."""
 
 async def extract_clauses_from_pages(pages: list[PageText]) -> list[Clause]:
     """Extract distinct clauses from document pages.
-    
+
     Processes pages in batches to balance extraction quality against API calls.
     Each clause preserves verbatim text (no paraphrasing) with page reference.
     """
     all_clauses: list[Clause] = []
     clause_counter = 0
-    
+
     for batch_start in range(0, len(pages), PAGES_PER_BATCH):
         batch = pages[batch_start:batch_start + PAGES_PER_BATCH]
-        
+
         batch_text = ""
         for page in batch:
             batch_text += f"\n--- PAGE {page.page_number} ---\n{page.text}\n"
-        
+
         wrapped_text, nonce = wrap_document_content(batch_text)
         boundary_instruction = get_data_boundary_instruction(nonce)
-        
+
         system_prompt = f"""You are a legal document clause extractor. Extract distinct clauses from the document text.
 
 {boundary_instruction}
@@ -94,6 +99,6 @@ Rules:
     # Re-number clauses sequentially to ensure consistency
     for i, clause in enumerate(all_clauses):
         clause.id = f"clause_{i:03d}"
-    
+
     logger.info(f"Extracted {len(all_clauses)} clauses from {len(pages)} pages")
     return all_clauses

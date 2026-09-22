@@ -5,9 +5,11 @@ before being processed or returned to the frontend.
 """
 
 from __future__ import annotations
+
 from enum import Enum
-from pydantic import BaseModel, Field
 from typing import Optional
+
+from pydantic import BaseModel, Field
 
 
 class ClauseCategory(str, Enum):
@@ -41,7 +43,7 @@ class DocumentType(str, Enum):
 
 class CertaintyLevel(str, Enum):
     """Three-way certainty distinction for QA responses.
-    
+
     Every substantive answer must be tagged with one of:
     - STATED: The document explicitly says this
     - INTERPRETED: A reasonable inference from the document
@@ -62,7 +64,7 @@ class PageText(BaseModel):
 
 class Clause(BaseModel):
     """A single clause extracted from a legal document.
-    
+
     The `text` field contains the VERBATIM text from the document,
     never paraphrased, to ensure verifiability by string match.
     """
@@ -111,7 +113,7 @@ class BatchExplanationResult(BaseModel):
 
 class QAResponse(BaseModel):
     """Evidence-grounded Q&A response with three-way distinction.
-    
+
     Every answer must explicitly separate:
     1. What the document explicitly states
     2. What is a reasonable interpretation
@@ -163,7 +165,7 @@ class ValidationResult(BaseModel):
 
 class FinalValidationResult(BaseModel):
     """Final response validation — acts as the guard on QA/scenario outputs.
-    
+
     Unsupported claims get downgraded to 'not established', never silently deleted.
     Strips anything resembling a leaked system prompt.
     """

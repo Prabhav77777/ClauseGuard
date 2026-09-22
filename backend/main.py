@@ -1,15 +1,20 @@
 import asyncio
 import logging
 import time
-from typing import Any
 from contextlib import asynccontextmanager
+from typing import Any
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
+from fastapi.responses import JSONResponse
 from slowapi import Limiter, _rate_limit_exceeded_handler
-from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
+from slowapi.util import get_remote_address
 
+from backend.api.chat import router as chat_router
+from backend.api.compare import router as compare_router
+from backend.api.documents import router as documents_router
 from backend.config import settings
 
 # Logging configuration
@@ -25,6 +30,7 @@ limiter = Limiter(key_func=get_remote_address)
 # Session store
 sessions: dict[str, Any] = {}
 sessions_lock = asyncio.Lock()
+
 
 async def cleanup_sessions():
     """Background task to clean up expired sessions."""
@@ -46,6 +52,7 @@ async def cleanup_sessions():
         except Exception as e:
             logger.error(f"Error in session cleanup: {e}")
 
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
@@ -62,16 +69,16 @@ async def lifespan(app: FastAPI):
     except asyncio.CancelledError:
         pass
 
+
 app = FastAPI(
     title="ClauseGuard API",
     description="GenAI-powered legal document analysis tool API",
     lifespan=lifespan
 )
 
-from fastapi.middleware.gzip import GZipMiddleware
-
 # Response Compression Middleware for Network Bandwidth Efficiency
 app.add_middleware(GZipMiddleware, minimum_size=500)
+
 
 # Security Response Headers Middleware
 @app.middleware("http")
@@ -81,7 +88,9 @@ async def add_security_headers(request: Request, call_next):
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["X-XSS-Protection"] = "1; mode=block"
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    response.headers["Content-Security-Policy"] = "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' https:;"
     return response
+
 
 # CORS middleware
 app.add_middleware(
@@ -96,15 +105,23 @@ app.add_middleware(
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
+
+# Security: Generic 500 error handler prevents stack trace and file path disclosure in production
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception):
+    logger.error(f"Unhandled server error on {request.url.path}: {exc}", exc_info=True)
+    return JSONResponse(
+        status_code=500,
+        content={"detail": "An internal server error occurred. Please try again later."}
+    )
+
+
 @app.get("/")
 @app.get("/health")
 @app.get("/api/health")
 async def health_check():
     return {"status": "ok", "service": "ClauseGuard API"}
 
-from backend.api.documents import router as documents_router
-from backend.api.chat import router as chat_router
-from backend.api.compare import router as compare_router
 
 app.include_router(documents_router)
 app.include_router(chat_router)

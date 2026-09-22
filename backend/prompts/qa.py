@@ -8,16 +8,17 @@ Every answer carries a citation and a three-way certainty distinction:
 """
 
 import logging
-from backend.models.schemas import Clause, QAResponse, CertaintyLevel
-from backend.security.prompt_guard import wrap_document_content, get_data_boundary_instruction
+
+from backend.models.schemas import CertaintyLevel, Clause, QAResponse
 from backend.prompts.gemini_client import call_gemini_structured
+from backend.security.prompt_guard import get_data_boundary_instruction, wrap_document_content
 
 logger = logging.getLogger(__name__)
 
 
 async def answer_question(question: str, retrieved_clauses: list[Clause]) -> QAResponse:
     """Answer a question using only the retrieved clauses.
-    
+
     The full document is NEVER sent — only top-k relevant clauses from
     the retriever.
     """
@@ -31,17 +32,17 @@ async def answer_question(question: str, retrieved_clauses: list[Clause]) -> QAR
             not_established="This topic does not appear to be covered by any clause in the document.",
             lawyer_question="You may want to ask your lawyer whether this topic should be addressed in the agreement."
         )
-    
+
     clauses_text = ""
     clause_ids = []
     for clause in retrieved_clauses:
         clauses_text += f"\nClause ID: {clause.id}\nSection: {clause.section}\nPage: {clause.page}\nText: {clause.text}\n---\n"
         clause_ids.append(clause.id)
-    
+
     wrapped_text, nonce = wrap_document_content(clauses_text)
     boundary_instruction = get_data_boundary_instruction(nonce)
     available_ids = ", ".join(clause_ids)
-    
+
     system_prompt = f"""You are ClauseGuard, a legal document analysis assistant. Answer questions about legal documents based ONLY on the provided clause excerpts.
 
 {boundary_instruction}

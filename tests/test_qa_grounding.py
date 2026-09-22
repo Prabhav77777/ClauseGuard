@@ -7,11 +7,9 @@ Tests:
 10. Every returned clause ID structurally exists in the parsed clause set
 """
 
-import pytest
-
-from backend.models.schemas import Clause, ClauseCategory, QAResponse, CertaintyLevel
-from backend.services.retriever import ClauseRetriever
+from backend.models.schemas import CertaintyLevel, QAResponse
 from backend.prompts.validation import validate_final_response
+from backend.services.retriever import ClauseRetriever
 
 
 class TestRetriever:

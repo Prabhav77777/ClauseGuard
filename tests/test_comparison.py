@@ -5,11 +5,14 @@ Tests:
 11. Brief generator produces valid markdown output
 """
 
-import pytest
 
 from backend.models.schemas import (
-    Clause, ClauseCategory, ComparisonItem, ComparisonResult,
-    DocumentSession, DocumentType,
+    Clause,
+    ClauseCategory,
+    ComparisonItem,
+    ComparisonResult,
+    DocumentSession,
+    DocumentType,
 )
 from backend.services.brief_generator import generate_brief
 

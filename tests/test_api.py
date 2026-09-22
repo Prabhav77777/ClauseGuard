@@ -9,7 +9,6 @@ Tests:
 - Security headers and CORS middleware on HTTP routes
 """
 
-import io
 import pytest
 from fastapi.testclient import TestClient
 
