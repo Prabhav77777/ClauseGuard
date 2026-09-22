@@ -42,6 +42,8 @@ class Settings(BaseSettings):
         "http://localhost:3000",
         "http://127.0.0.1:5173",
         "http://127.0.0.1:3000",
+        "https://clause-guard-ejysrsrcc-prabhav77777s-projects.vercel.app",
+        "https://clauseguard.vercel.app",
     ]
 
     model_config = SettingsConfigDict(

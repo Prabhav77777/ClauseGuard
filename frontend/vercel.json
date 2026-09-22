@@ -5,7 +5,7 @@
   "rewrites": [
     {
       "source": "/api/(.*)",
-      "destination": "https://clauseguard-backend-3hhm.onrender.com"
+      "destination": "https://clauseguard-backend.onrender.com/api/$1"
     },
     {
       "source": "/(.*)",
