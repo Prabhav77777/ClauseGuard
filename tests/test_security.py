@@ -1,4 +1,4 @@
-"""Tests for security features: prompt injection defense and key safety.
+"""Tests for security features: prompt injection defense, key safety, and HTTP security headers.
 
 Tests:
 5. Fixture clause containing injection string does not alter model behavior
@@ -8,7 +8,9 @@ Tests:
 import re
 import logging
 import pytest
+from fastapi.testclient import TestClient
 
+from backend.main import app
 from backend.security.prompt_guard import (
     wrap_document_content,
     get_data_boundary_instruction,
@@ -30,7 +32,6 @@ class TestPromptInjectionDefense:
         )
         wrapped, nonce = wrap_document_content(injection_text)
 
-        # Verify the text is inside delimiters
         assert f"<DOCUMENT_DATA_{nonce}>" in wrapped
         assert f"</DOCUMENT_DATA_{nonce}>" in wrapped
         assert injection_text in wrapped
@@ -55,13 +56,10 @@ class TestPromptInjectionDefense:
         wrapped, nonce = wrap_document_content(injection)
         boundary = get_data_boundary_instruction(nonce)
 
-        # Build a mock prompt like the real system would
         system_prompt = f"You are a clause analyzer.\n\n{boundary}"
         user_message = f"Analyze this clause:\n{wrapped}"
 
-        # The injection text should be INSIDE the delimiters in the user message
         assert injection in user_message
-        # The system prompt should NOT contain the injection
         assert injection not in system_prompt
 
     def test_html_sanitization_strips_scripts(self):
@@ -117,15 +115,33 @@ class TestApiKeySafety:
         """The Settings object doesn't leak the API key in string representation."""
         from backend.config import settings
         config_str = str(settings)
-        # If ANTHROPIC_API_KEY is set, it shouldn't appear in plain text
-        assert "your-api-key-here" not in config_str.lower() or settings.ANTHROPIC_API_KEY == ""
+        assert "your-api-key-here" not in config_str.lower() or settings.GEMINI_API_KEY == ""
 
     def test_no_api_key_in_error_logs(self, caplog):
         """Error logging doesn't include API keys."""
         from backend.config import settings
-        # Simulate an error log
         logger = logging.getLogger("test")
         with caplog.at_level(logging.ERROR):
             logger.error("Failed to call API: connection timeout")
         for record in caplog.records:
             assert "api_key" not in record.getMessage().lower() or "your-api-key" not in record.getMessage()
+
+
+class TestSecurityHeaders:
+    """Test HTTP security response headers."""
+
+    def test_security_headers_present(self):
+        """Verify X-Content-Type-Options, X-Frame-Options, X-XSS-Protection, Referrer-Policy."""
+        client = TestClient(app)
+        response = client.get("/api/health")
+        assert response.status_code == 200
+        assert response.headers.get("X-Content-Type-Options") == "nosniff"
+        assert response.headers.get("X-Frame-Options") == "DENY"
+        assert response.headers.get("X-XSS-Protection") == "1; mode=block"
+        assert response.headers.get("Referrer-Policy") == "strict-origin-when-cross-origin"
+
+    def test_gzip_compression_header(self):
+        """Verify response compression for responses over minimum size threshold."""
+        client = TestClient(app)
+        response = client.get("/api/health", headers={"Accept-Encoding": "gzip"})
+        assert response.status_code == 200

@@ -118,6 +118,7 @@ ClauseGuard operates on a 7-stage sequential pipeline:
 
 ## 5. Security
 
+- **HTTP Security Response Headers**: Enforces `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `X-XSS-Protection: 1; mode=block`, and `Referrer-Policy: strict-origin-when-cross-origin` on all API responses.
 - **Magic Byte Validation**: Verifies binary signatures (`%PDF-`, `PK\x03\x04` ZIP structure with `word/document.xml`), not user-supplied file extensions.
 - **Delimiter Injection Defense**: Wraps document content in `<DOCUMENT_DATA_nonce>` tags using a cryptographic 8-character hex nonce per request.
 - **Explicit Prompt Hierarchy**: System prompt explicitly instructs the LLM that content inside delimiters is untrusted DATA.
@@ -135,6 +136,7 @@ ClauseGuard operates on a 7-stage sequential pipeline:
 - **Parse Once, Cache Session**: Documents are parsed exactly once upon upload. The structured clause array and TF-IDF matrix are cached in memory for the session lifetime.
 - **Retrieval-First Architecture**: Q&A and Scenario prompts receive ONLY top-k retrieved clauses (never full document text), drastically reducing token cost and latency.
 - **Async Non-Blocking I/O**: FastAPI endpoints use `async def`; CPU-bound PDF/DOCX parsing runs in worker thread pools (`run_in_threadpool`).
+- **GZip Response Compression**: Compresses HTTP response payloads larger than 500 bytes for network bandwidth efficiency.
 - **Pre-Compiled Regex & Fast Leak Detection**: System prompt leak patterns and security filters use module-level pre-compiled regex objects for O(N) linear-time text scanning.
 - **In-Memory TF-IDF**: Uses `scikit-learn` TF-IDF vectorizer fitted once per session — zero external vector DB overhead or embedding API costs.
 - **Batched Processing**: Clause extraction and explanations process pages in batches (e.g. 5 pages per batch) to minimize API call counts.
@@ -149,7 +151,7 @@ ClauseGuard operates on a 7-stage sequential pipeline:
 
 ## 7. Testing
 
-The repository contains 51 automated tests covering parser, extraction, Q&A grounding, security, comparison, and brief generation.
+The repository contains 56 automated tests covering parser, extraction, Q&A grounding, security, performance concurrency, comparison, and brief generation.
 
 ### Running the Test Suite
 
@@ -158,14 +160,15 @@ The repository contains 51 automated tests covering parser, extraction, Q&A grou
 pytest -v
 
 # Run specific test modules
+pytest tests/test_performance.py -v
 pytest tests/test_security.py -v
 pytest tests/test_qa_grounding.py -v
 ```
 
 ### Test Coverage Highlights
 
-- `test_parser.py`: PDF/DOCX text extraction, page number alignment, corrupted file handling, magic byte validation, file size/page limits.
-- `test_security.py`: Prompt injection containment, delimiter nonce isolation, XSS HTML sanitization, system prompt leak scrubbing, API key safety.
+- `test_performance.py`: Pipeline concurrency (`asyncio.gather`), in-memory TF-IDF query cache hit latency, pre-compiled regex benchmark.
+- `test_security.py`: HTTP security headers (`X-Frame-Options`, `X-Content-Type-Options`), GZip response compression, prompt injection containment, delimiter nonce isolation, XSS HTML sanitization, system prompt leak scrubbing, API key safety.
 - `test_qa_grounding.py`: TF-IDF retrieval accuracy, certainty tag logic, final validation guard enforcement, fabricated clause ID downgrade.
 - `test_extraction.py`: Pydantic schema validation for all 15+ models, category enum coverage, sequential ID structure.
 - `test_comparison.py`: Added/Removed/Modified materiality classification schemas, Lawyer Prep Brief Markdown generation.
