@@ -1,6 +1,9 @@
-"""Shared core prompt helper utilities.
+"""
+MODULE: Shared prompt formatting and schema fallback construction utilities.
 
-Provides reusable formatting and fallback construction functions for LLM prompt modules.
+@level-one-validation: Pure formatting and fallback generation functions. Solid logic without external dependencies. Tested via legal_analyzer and QA prompt tests.
+
+#Scope-Of-Improvement: Add token counting helper to accurately estimate prompt length before dispatching to Gemini API.
 """
 
 from typing import Any
@@ -8,6 +11,8 @@ from typing import Any
 from backend.models.schemas import Clause
 
 
+# #What: Formats list of Clause objects into structured prompt context string and returns extracted clause IDs
+# #Business-Intent: Guarantees prompt context follows strict structure so LLM can cite verbatim clause IDs accurately.
 def format_clauses_for_prompt(clauses: list[Clause]) -> tuple[str, list[str]]:
     """Format a list of Clause objects into structured prompt text and extract clause IDs.
 
@@ -36,6 +41,8 @@ def format_clauses_for_prompt(clauses: list[Clause]) -> tuple[str, list[str]]:
     return "\n".join(text_blocks), clause_ids
 
 
+# #What: Generates safe schema-compliant fallback dict when LLM calls fail
+# #Business-Intent: Prevents 500 crashes when LLM API calls time out or return corrupted json.
 def safe_fallback_dict(message: str, field_names: list[str]) -> dict[str, Any]:
     """Construct a safe fallback dictionary matching target schema fields on LLM failure.
 

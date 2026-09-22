@@ -1,10 +1,9 @@
-"""Lawyer Prep Brief generator.
+"""
+MODULE: Markdown Lawyer Prep Brief generator.
 
-Compiles accumulated 'unclear' items and suggested lawyer questions
-from Q&A and scenario analysis sessions into an exportable markdown document.
+@level-one-validation: Pure function compiling session accumulated questions and unclear items into structured Markdown. Fully covered by test_comparison.py.
 
-This creates an actionable briefing document the user can bring to
-their lawyer, containing specific questions grounded in the contract.
+#Scope-Of-Improvement: Add PDF export option alongside Markdown export.
 """
 
 import logging
@@ -15,6 +14,7 @@ from backend.models.schemas import Clause, DocumentSession
 logger = logging.getLogger(__name__)
 
 
+# #Business-Intent: Satisfies challenge requirement for actionable briefing outputs helping users prepare questions for a legal professional.
 def generate_brief(session: DocumentSession) -> str:
     """Generate a Lawyer Prep Brief as markdown.
 

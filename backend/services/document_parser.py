@@ -1,12 +1,9 @@
-"""Document text extraction with page awareness.
+"""
+MODULE: Document text parsing and extraction for PDF and DOCX.
 
-Parses PDF and DOCX files into page-indexed text chunks. Parsing is done
-synchronously in a thread pool to avoid blocking the async event loop.
+@level-one-validation: High-throughput parsing offloaded to worker threadpool via run_in_threadpool. Features SHA256 parse caching. Tested in test_parser.py and test_performance.py.
 
-Efficiency:
-- In-memory content hash (SHA256) caching for instant O(1) page text re-use.
-- Threadpool execution prevents blocking main async loop during CPU parsing.
-- Single-pass text extraction with minimal memory allocation.
+#Scope-Of-Improvement: Add Tesseract OCR fallback for image-only scanned PDFs.
 """
 
 import hashlib
@@ -25,6 +22,8 @@ logger = logging.getLogger(__name__)
 _PARSE_CACHE: dict[str, list[PageText]] = {}
 
 
+# @risk-area: Scanned PDFs without extractable text layer will return no text; requires OCR engine for full coverage.
+# #What: Extracts page-numbered text blocks from PDF stream using PyMuPDF
 def _parse_pdf_sync(file_bytes: bytes) -> list[PageText]:
     """Extract text from PDF with page numbers. Runs in thread pool."""
     import pymupdf  # Import inside function to keep module import lightweight
@@ -49,6 +48,7 @@ def _parse_pdf_sync(file_bytes: bytes) -> list[PageText]:
         doc.close()
 
 
+# #What: Extracts text paragraphs and table cell text from DOCX stream
 def _parse_docx_sync(file_bytes: bytes) -> list[PageText]:
     """Extract text from DOCX with estimated page numbers."""
     import docx
@@ -100,6 +100,7 @@ def _parse_docx_sync(file_bytes: bytes) -> list[PageText]:
     return pages
 
 
+# #Business-Intent: Converts uploaded binary files into page-aware text chunks for clause extraction.
 async def parse_document(file_bytes: bytes, file_type: str) -> list[PageText]:
     """Parse a document into page-indexed text chunks with content hash caching.
 

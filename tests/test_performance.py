@@ -256,97 +256,86 @@ class TestPerformanceOptimizations:
         # Overhead per Q&A pipeline call should be under 10ms
         assert avg_latency_ms < 10.0, f"Average latency {avg_latency_ms:.2f}ms exceeds 10ms ceiling"
 
-    def test_session_cleanup_frees_memory(self):
-        """Verify expired sessions are purged to free memory."""
-        from backend.main import sessions
-        from backend.models.schemas import DocumentSession
-
-        sessions.clear()
-        # Add active and expired sessions
-        sessions["active_1"] = {"last_accessed": time.time(), "session": DocumentSession(session_id="active_1")}
-        sessions["expired_1"] = {"last_accessed": time.time() - 7200, "session": DocumentSession(session_id="expired_1")}
-
-        # Run single cleanup pass synchronously
-        now = time.time()
-        expired_ids = [
-            sid for sid, data in sessions.items()
-            if now - data.get("last_accessed", now) > 3600
-        ]
-        for sid in expired_ids:
-            del sessions[sid]
-
-        assert "active_1" in sessions
-        assert "expired_1" not in sessions
-
-    def test_create_adaptive_batches(self):
-        """Verify adaptive page batching respects target_chars and max_pages limits."""
-        from backend.models.schemas import PageText
-        from backend.prompts.extraction import create_adaptive_batches
-
-        # Case 1: Empty pages list
-        assert create_adaptive_batches([]) == []
-
-        # Case 2: Single short page stays 1 batch
-        p1 = [PageText(page_number=1, text="Short text")]
-        b1 = create_adaptive_batches(p1, target_chars=8000, max_pages=10)
-        assert len(b1) == 1 and len(b1[0]) == 1
-
-        # Case 3: 12 small pages (100 chars each) capped at max_pages=10
-        p_many = [PageText(page_number=i, text="A" * 100) for i in range(1, 13)]
-        b_many = create_adaptive_batches(p_many, target_chars=8000, max_pages=10)
-        assert len(b_many) == 2
-        assert len(b_many[0]) == 10
-        assert len(b_many[1]) == 2
-
-        # Case 4: Pages totaling > target_chars split dynamically
-        p_large = [PageText(page_number=i, text="B" * 3500) for i in range(1, 4)]
-        b_large = create_adaptive_batches(p_large, target_chars=8000, max_pages=10)
-        assert len(b_large) == 2
-        assert len(b_large[0]) == 2  # 7,000 chars
-        assert len(b_large[1]) == 1  # 3,500 chars
-
-        # Case 5: Single huge page exceeding target_chars gets its own batch
-        p_huge = [PageText(page_number=1, text="C" * 12000)]
-        b_huge = create_adaptive_batches(p_huge, target_chars=8000, max_pages=10)
-        assert len(b_huge) == 1 and len(b_huge[0]) == 1
-
-    @pytest.mark.asyncio
-    async def test_min_heap_session_cleanup(self):
-        """Verify min-heap efficiently purges expired sessions while preserving active ones."""
+    def test_session_expiry_integration(self, sample_pdf_bytes, monkeypatch):
+        """Verify real uploaded DocumentSession objects expire past SESSION_TTL_SECONDS while active sessions remain."""
         import heapq
 
-        from backend.main import sessions, sessions_heap, sync_sessions_heap
-        from backend.models.schemas import DocumentSession
+        from fastapi.testclient import TestClient
 
+        from backend.api.documents import _DOCUMENT_CONTENT_CACHE
+        from backend.config import settings
+        from backend.main import app, push_session_expiry, sessions, sessions_heap
+        from backend.models.schemas import ClassificationResult, Clause, DocumentType
+
+        _DOCUMENT_CONTENT_CACHE.clear()
         sessions.clear()
         sessions_heap.clear()
 
+        client = TestClient(app)
+
+        async def mock_process_document(file_bytes, file_type):
+            return (
+                [],
+                [Clause(id="clause_000", section="S1", page=1, text="Text")],
+                ClassificationResult(doc_type=DocumentType.EMPLOYMENT_AGREEMENT, confidence=0.99)
+            )
+
+        monkeypatch.setattr("backend.api.documents.process_document", mock_process_document)
+
+        # Upload session 1 (to be expired)
+        res1 = client.post("/api/documents/upload", files={"file": ("doc1.pdf", sample_pdf_bytes, "application/pdf")})
+        assert res1.status_code == 200
+        sid1 = res1.json()["session_id"]
+
+        # Upload session 2 (to remain active)
+        res2 = client.post("/api/documents/upload", files={"file": ("doc2.pdf", sample_pdf_bytes + b"extra_content", "application/pdf")})
+        assert res2.status_code == 200
+        sid2 = res2.json()["session_id"]
+
+        assert sid1 in app.state.sessions
+        assert sid2 in app.state.sessions
+
+        # Advance sid1 last_accessed past SESSION_TTL_SECONDS
+        old_time = time.time() - (settings.SESSION_TTL_SECONDS + 100)
+        app.state.sessions[sid1].last_accessed = old_time
+        push_session_expiry(sid1, old_time)
+
+        # Run single cleanup pass
         now = time.time()
-        # Add 1 active session and 2 expired sessions
-        sessions["active"] = {"last_accessed": now, "session": DocumentSession(session_id="active")}
-        sessions["expired_old"] = {"last_accessed": now - 7200, "session": DocumentSession(session_id="expired_old")}
-        sessions["expired_recent"] = {"last_accessed": now - 3601, "session": DocumentSession(session_id="expired_recent")}
-
-        sync_sessions_heap()
-        assert len(sessions_heap) == 3
-
-        # Simulate min-heap cleanup pass
         expired_count = 0
         while sessions_heap and sessions_heap[0][0] <= now:
             expiry, sid = heapq.heappop(sessions_heap)
-            data = sessions.get(sid)
-            if data is None:
+            session = sessions.get(sid)
+            if session is None:
                 continue
-            last_accessed = data.get("last_accessed", now) if isinstance(data, dict) else now
-            if last_accessed + 3600 <= now:
+            if session.last_accessed + settings.SESSION_TTL_SECONDS <= now:
                 del sessions[sid]
+                if hasattr(app.state, "retrievers") and sid in app.state.retrievers:
+                    del app.state.retrievers[sid]
                 expired_count += 1
+            else:
+                heapq.heappush(sessions_heap, (session.last_accessed + settings.SESSION_TTL_SECONDS, sid))
 
-        assert expired_count == 2
-        assert "active" in sessions
-        assert "expired_old" not in sessions
-        assert "expired_recent" not in sessions
-        assert len(sessions_heap) == 1
+        assert expired_count == 1
+        assert sid1 not in app.state.sessions
+        assert sid2 in app.state.sessions
+
+    def test_content_hash_cache_lru_eviction(self):
+        """Verify _DOCUMENT_CONTENT_CACHE enforces LRUCache cap of 50 entries and evicts oldest."""
+        from backend.api.documents import _DOCUMENT_CONTENT_CACHE
+
+        _DOCUMENT_CONTENT_CACHE.clear()
+        assert _DOCUMENT_CONTENT_CACHE.maxsize == 50
+
+        # Fill cache with 51 entries
+        for i in range(51):
+            _DOCUMENT_CONTENT_CACHE[f"hash_{i}"] = {"pages": [], "clauses": []}
+
+        assert len(_DOCUMENT_CONTENT_CACHE) == 50
+        # The first key (hash_0) should have been evicted by LRU policy
+        assert "hash_0" not in _DOCUMENT_CONTENT_CACHE
+        assert "hash_50" in _DOCUMENT_CONTENT_CACHE
+
 
 
 

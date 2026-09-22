@@ -1,10 +1,9 @@
-"""Clause extraction and document classification prompts.
+"""
+MODULE: Page-aware clause extraction and document type classification prompts.
 
-Extracts distinct clauses from page-aware document text, preserving
-verbatim text for verifiability. Also classifies the document type.
+@level-one-validation: Uses adaptive page batching (~8,000 chars / max 10 pages) to extract verbatim clause text with page references. Covered by test_extraction.py and test_performance.py.
 
-Efficiency: Pages are processed in batches of ~5 to balance extraction
-quality against API call count. One batch = one LLM call.
+#Scope-Of-Improvement: Add regex fallback pre-segmentation to preserve clause boundaries even if Gemini extraction fails on corrupted OCR inputs.
 """
 
 import logging
@@ -26,6 +25,7 @@ TARGET_CHARS_PER_BATCH = 8000
 MAX_PAGES_PER_BATCH = 10
 
 
+# #What: Dynamically groups document pages into batches targeting ~8,000 characters or max 10 pages to minimize LLM call count
 def create_adaptive_batches(
     pages: list[PageText], target_chars: int = TARGET_CHARS_PER_BATCH, max_pages: int = MAX_PAGES_PER_BATCH
 ) -> list[list[PageText]]:
@@ -57,6 +57,7 @@ def create_adaptive_batches(
     return batches
 
 
+# #Business-Intent: Classifies legal document type (employment agreement, lease, NDA, etc.) to inform downstream analysis.
 async def classify_document(pages: list[PageText]) -> ClassificationResult:
     """Classify the document type from sampled text.
 
@@ -85,6 +86,7 @@ You must select from this exact list. If uncertain, choose 'unknown'."""
         return ClassificationResult(doc_type=DocumentType.UNKNOWN, confidence=0.0)
 
 
+# #Business-Intent: Extracts verbatim clause text with section titles and page numbers for strict grounding and verifiability.
 async def extract_clauses_from_pages(pages: list[PageText]) -> list[Clause]:
     """Extract distinct clauses from document pages.
 

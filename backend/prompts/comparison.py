@@ -1,8 +1,9 @@
-"""Two-document comparison prompt.
+"""
+MODULE: Two-document comparison prompt orchestration.
 
-Compares matched clause pairs from two documents, classifying changes
-as Added/Removed/Modified with materiality (cosmetic vs. substantive)
-and stated justification.
+@level-one-validation: Compares clause sets between two document versions and outputs structured ComparisonResult. Solid prompt guard isolation. Tested in test_comparison.py.
+
+#Scope-Of-Improvement: Pre-align matching clauses using fuzzy string matching before calling LLM to reduce prompt context size.
 """
 
 import logging
@@ -14,6 +15,8 @@ from backend.security.prompt_guard import get_data_boundary_instruction, wrap_do
 logger = logging.getLogger(__name__)
 
 
+# #Uncertain: LLM diff alignment may hallucinate non-existent diffs if clause order in Doc2 changes radically relative to Doc1.
+# #Business-Intent: Implements contract comparison feature classifying diffs as Added/Removed/Modified with cosmetic vs substantive materiality.
 async def compare_documents(
     clauses_doc1: list[Clause], clauses_doc2: list[Clause]
 ) -> ComparisonResult:

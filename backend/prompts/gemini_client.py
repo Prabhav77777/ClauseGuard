@@ -1,10 +1,9 @@
-"""Gemini API client helper for structured JSON generation.
+"""
+MODULE: Gemini API SDK client singleton and structured JSON call wrapper.
 
-Uses Google Gemini SDK (google-genai) to generate structured outputs
-conforming strictly to Pydantic schemas.
+@level-one-validation: Singleton client configuration enables connection pooling. Response schema validation guarantees Pydantic return types. Tested via test_e2e_integration.py and test_qa_grounding.py.
 
-Efficiency: Uses a singleton client instance to enable connection pooling
-and avoid repeated TCP/TLS handshake setup overhead across requests.
+#Scope-Of-Improvement: Add exponential backoff retry decorator to handle transient HTTP 429 / rate limit errors gracefully.
 """
 
 import logging
@@ -24,6 +23,7 @@ T = TypeVar("T", bound=BaseModel)
 _CLIENT_INSTANCE: genai.Client | None = None
 
 
+# #What: Manages singleton Gemini Client instance for connection pooling across requests
 def _get_gemini_client() -> genai.Client:
     """Retrieve or create the module-level singleton Gemini client.
 
@@ -36,6 +36,8 @@ def _get_gemini_client() -> genai.Client:
     return _CLIENT_INSTANCE
 
 
+# @risk-area: Synchronous generate_content call blocks worker thread; if network latency increases, worker thread pool can saturate.
+# #What: Generates structured JSON output from Gemini API validated against target Pydantic schema
 def call_gemini_structured(
     system_instruction: str,
     user_content: str,

@@ -1,8 +1,9 @@
-"""Prompt injection defense and output sanitization.
+"""
+MODULE: Prompt injection defense, HTML sanitization, and output leak redaction.
 
-All document text sent to the LLM is wrapped in explicit DATA delimiters
-with a per-request nonce to prevent delimiter-escape attacks. This module
-also sanitizes any document text rendered as HTML.
+@level-one-validation: Cryptographic nonces wrap untrusted input DATA, pre-compiled regex strips leaks, and bleach cleans HTML. Solid security perimeter tested in test_security.py.
+
+#Scope-Of-Improvement: Add structured audit logging when system prompt leak redaction is triggered.
 """
 
 import re
@@ -14,6 +15,7 @@ import bleach
 _NONCE_LENGTH = 8
 
 
+# #What: Generates cryptographic 8-character hex nonce for delimiter isolation
 def generate_nonce() -> str:
     """Generate a cryptographic nonce for delimiter randomization.
 
@@ -23,6 +25,7 @@ def generate_nonce() -> str:
     return secrets.token_hex(_NONCE_LENGTH // 2)
 
 
+# #Business-Intent: Prevents prompt injection attacks by insulating LLM system instructions from untrusted user document text.
 def wrap_document_content(text: str, nonce: str | None = None) -> tuple[str, str]:
     """Wrap document text in nonce-tagged DATA delimiters.
 
@@ -63,6 +66,7 @@ def get_data_boundary_instruction(nonce: str) -> str:
     )
 
 
+# #What: Uses bleach library to strip all HTML tags from output text preventing XSS attacks
 def sanitize_for_html(text: str) -> str:
     """Sanitize text for safe HTML rendering.
 
@@ -83,6 +87,7 @@ _LEAK_PATTERNS = [
 ]
 
 
+# #What: Uses pre-compiled regex patterns to strip system prompt leakage patterns
 def strip_system_prompt_leaks(response_text: str) -> str:
     """Detect and remove content resembling system prompt leakage.
 

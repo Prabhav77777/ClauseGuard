@@ -1,8 +1,9 @@
-"""File upload validation — security-first approach.
+"""
+MODULE: Binary file upload validation, magic byte checking, and zip-bomb defense.
 
-Validates files by magic bytes (not extension), enforces size/page/character
-limits, and strips metadata. This is the first line of defense before any
-document content reaches the parser or LLM.
+@level-one-validation: High-performance fail-fast file validation enforcing magic bytes (%PDF-, PK\x03\x04), zip compression ratio caps, and 0-byte checks before parsing. Tested in test_parser.py and test_security.py.
+
+#Scope-Of-Improvement: Add clamav virus scanning hook before magic byte inspection for high-security enterprise deployments.
 """
 
 import io
@@ -17,6 +18,7 @@ PDF_MAGIC = b"%PDF"
 ZIP_MAGIC = b"PK\x03\x04"
 
 
+# #What: Rejects empty 0-byte or oversized files exceeding file size ceiling
 def validate_file_size(file_bytes: bytes) -> None:
     """Reject empty (0 bytes) or oversized files exceeding configured size limit."""
     if not file_bytes or len(file_bytes) == 0:
@@ -36,6 +38,8 @@ MAX_ZIP_RATIO = 100.0  # Max uncompressed-to-compressed size ratio
 MAX_UNCOMPRESSED_BYTES = 25 * 1024 * 1024  # 25 MB max uncompressed ceiling
 
 
+# #What: Protects against zip bomb and XML entity expansion DoS attacks by inspecting uncompressed ratio before parsing
+# #Business-Intent: Prevents resource exhaustion attacks on server memory when unzipping docx archives.
 def validate_zip_ratio(file_bytes: bytes) -> None:
     """Protect against zip bomb / XML expansion DoS attacks in DOCX files.
 
@@ -58,6 +62,7 @@ def validate_zip_ratio(file_bytes: bytes) -> None:
             pass
 
 
+# #Business-Intent: Enforces binary signature validation to prevent malformed or malicious upload payloads from reaching backend parsers.
 def detect_file_type(file_bytes: bytes) -> str:
     """Detect file type by magic bytes. Returns 'pdf' or 'docx'.
 

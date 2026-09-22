@@ -1,7 +1,9 @@
-"""Plain-language clause explanation prompt.
+"""
+MODULE: Plain-language clause explanation prompt orchestration.
 
-Generates simple, jargon-free explanations for legal clauses.
-Processes clauses in batches to reduce API call count.
+@level-one-validation: Explains clauses in batches of 10 without adding facts absent from verbatim text. Solid batched processing. Covered by test_performance.py.
+
+#Scope-Of-Improvement: Make batch size dynamic based on character count similar to extraction adaptive batching.
 """
 
 import logging
@@ -15,6 +17,7 @@ logger = logging.getLogger(__name__)
 CLAUSES_PER_BATCH = 10
 
 
+# #Business-Intent: Satisfies the challenge requirement for simplifying complex legal documents into plain, jargon-free English without legal advice.
 async def explain_clauses(clauses: list[Clause]) -> list[PlainExplanationResult]:
     """Generate plain-English explanations for clauses.
 

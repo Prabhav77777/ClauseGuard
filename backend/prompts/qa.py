@@ -1,10 +1,9 @@
-"""Evidence-grounded Q&A prompt.
+"""
+MODULE: Evidence-grounded Q&A prompt orchestration.
 
-Answers user questions using ONLY retrieved clauses (never the full document).
-Every answer carries a citation and a three-way certainty distinction:
-- STATED: What the document explicitly says
-- INTERPRETED: Reasonable inference
-- NOT_ESTABLISHED: Cannot be determined from the document
+@level-one-validation: Answers user questions using top-k retrieved clauses only. Enforces 3-way certainty distinction and prompt guard nonces. Tested in test_qa_grounding.py.
+
+#Scope-Of-Improvement: Pass historical question-answer pairs for session conversational context during multi-turn Q&A.
 """
 
 import logging
@@ -16,6 +15,8 @@ from backend.security.prompt_guard import get_data_boundary_instruction, wrap_do
 logger = logging.getLogger(__name__)
 
 
+# #Uncertain: LLM may occasionally generate valid reasoning but cite an invalid clause ID format if not strictly bounded by validation guard.
+# #Business-Intent: Satisfies the challenge requirement for answering questions based on legal documents with strict distinction between stated facts and inferences.
 async def answer_question(question: str, retrieved_clauses: list[Clause]) -> QAResponse:
     """Answer a question using only the retrieved clauses.
 

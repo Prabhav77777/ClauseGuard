@@ -1,7 +1,9 @@
-"""Scenario analysis prompt.
+"""
+MODULE: Scenario simulator prompt orchestration.
 
-Reasons about hypothetical scenarios (e.g., 'What happens if I resign after 4 months?')
-by pulling and reasoning across multiple relevant clauses from different categories.
+@level-one-validation: Reasons across multiple clause categories for complex hypothetical scenarios. Enforces non-advice framing and prompt guard nonces. Tested in test_api.py and test_e2e_integration.py.
+
+#Scope-Of-Improvement: Add pre-built template scenarios in prompt for common contract types (e.g. early resignation, IP ownership, lease termination).
 """
 
 import logging
@@ -13,6 +15,7 @@ from backend.security.prompt_guard import get_data_boundary_instruction, wrap_do
 logger = logging.getLogger(__name__)
 
 
+# #Business-Intent: Satisfies the challenge Scenario Simulator requirement helping users evaluate options and potential next steps.
 async def analyze_scenario(scenario: str, retrieved_clauses: list[Clause]) -> ScenarioResponse:
     """Analyze a hypothetical scenario against relevant clauses."""
     if not retrieved_clauses:

@@ -1,3 +1,49 @@
+## PR REVIEW NOTES
+
+### Second-Pass Architecture & Code Review Findings
+- **Session Expiry & Heap Cleanup**: Addressed session expiry bug by adding `last_accessed` timestamp tracking to `DocumentSession` model schema, enabling automated session cleanup in `backend/main.py` via `push_session_expiry` and min-heap tracking.
+- **Content Hash Caching & Bound Safety**: Implemented thread-safe `cachetools.LRUCache(maxsize=50)` wrapped with `asyncio.Lock()` for `_DOCUMENT_CONTENT_CACHE` in `backend/api/documents.py` to prevent memory leaks during high-volume document uploads.
+- **500 Error Handler Alignment**: Documented `#Business-Intent` reasoning for route-level exception handling vs global 500 error sanitization middleware.
+- **Taxonomy & Codebase Tagging**: Fully tagged all 30 backend Python modules with block-level taxonomy tags (`MODULE:`, `@level-one-validation:`, `#Scope-Of-Improvement:`, `@risk-area:`, `#Uncertain:`, `#What:`, `#Business-Intent:`).
+
+### Consolidated Risk Areas (`@risk-area`)
+- `backend/main.py`: In-memory session dictionary and min-heap are lost on process restart and cannot be shared across multiple worker processes.
+- `backend/api/documents.py`: In-memory content hash cache uses `LRUCache(maxsize=50)` with `asyncio.Lock()`; multi-worker horizontal scaling requires a shared backend (e.g., Redis).
+- `backend/api/compare.py`: Synchronous sequential processing of two documents doubles pipeline latency; could leverage `asyncio.gather` for parallel parsing.
+- `backend/core/limiter.py`: In-memory rate limiting tracks limits per process; multi-worker deployments require Redis storage backend.
+- `backend/config.py`: Statically cached settings via `lru_cache` cannot reflect runtime environment changes without process restart.
+- `backend/prompts/gemini_client.py`: Synchronous `generate_content` call blocks worker thread pool under high network latency.
+- `backend/prompts/validation.py`: Synchronous validation check adds an additional LLM API call latency overhead.
+- `backend/services/document_parser.py`: Scanned PDFs without extractable text layer return empty text; requires OCR engine fallback for full coverage.
+- `backend/services/retriever.py`: TF-IDF relies on exact term matching; queries with heavy synonyms without keyword overlap may yield lower similarity scores.
+
+### Consolidated Scopes of Improvement (`#Scope-Of-Improvement`)
+- `backend/main.py`: Migrate in-memory session dictionary and min-heap to Redis for distributed multi-worker production deployments.
+- `backend/api/documents.py`: Support multipart chunked upload streams for very large files exceeding typical HTTP body buffers.
+- `backend/api/compare.py`: Run `process_document` for file1 and file2 concurrently via `asyncio.gather` to reduce total comparison latency.
+- `backend/api/chat.py`: Add stream response option for long scenario analyses to improve perceived client UI latency.
+- `backend/services/document_parser.py`: Add Tesseract OCR fallback for image-only scanned PDFs.
+- `backend/services/retriever.py`: Add hybrid BM25 + dense embedding re-ranking if semantically complex queries exhibit keyword mismatch.
+- `backend/services/legal_analyzer.py`: Add thread-safe locking to TTLCache instances if high concurrency causes cache state mutation contention.
+- `backend/services/clause_extractor.py`: Add pipeline status callback parameter to report progress percentages to real-time WebSockets.
+- `backend/services/brief_generator.py`: Add PDF export option alongside Markdown export.
+- `backend/security/validation.py`: Add clamav virus scanning hook before magic byte inspection for high-security enterprise deployments.
+- `backend/security/prompt_guard.py`: Add structured audit logging when system prompt leak redaction is triggered.
+- `backend/prompts/categorization.py`: Split very large clause sets (>100 clauses) into multiple sub-batches to prevent hitting prompt output token limits.
+- `backend/prompts/comparison.py`: Pre-align matching clauses using fuzzy string matching before calling LLM to reduce prompt context size.
+- `backend/prompts/explanation.py`: Make batch size dynamic based on character count similar to extraction adaptive batching.
+- `backend/prompts/extraction.py`: Add regex fallback pre-segmentation to preserve clause boundaries even if Gemini extraction fails on corrupted OCR inputs.
+- `backend/prompts/gemini_client.py`: Add exponential backoff retry decorator to handle transient HTTP 429 / rate limit errors gracefully.
+- `backend/prompts/qa.py`: Pass historical question-answer pairs for session conversational context during multi-turn Q&A.
+- `backend/prompts/scenario.py`: Add pre-built template scenarios in prompt for common contract types.
+- `backend/prompts/validation.py`: Log validation failure metrics to monitor LLM citation accuracy over time.
+- `backend/models/schemas.py`: Add custom Pydantic validators to enforce non-empty whitespace checking on verbatim clause strings.
+- `backend/config.py`: Add settings refresh method to allow live environment configuration reloads in containerized deployments.
+- `backend/core/limiter.py`: Use Redis storage backend for slowapi to share rate limit counts across multiple API worker nodes.
+- `backend/core/prompt_helpers.py`: Add token counting helper to accurately estimate prompt length before dispatching to Gemini API.
+
+---
+
 # ClauseGuard Focused
 
 > **GenAI-Powered Legal Document Analysis & Assistance System**

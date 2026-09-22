@@ -1,7 +1,9 @@
-"""Document comparison endpoints.
+"""
+MODULE: Two-document comparison FastAPI router.
 
-Provides two-document comparison with materiality classification
-(cosmetic vs. substantive) and stated justification.
+@level-one-validation: Processes and compares two documents concurrently. File cleanup in finally block is robust. Tested in test_comparison.py.
+
+#Scope-Of-Improvement: Run process_document for file1 and file2 concurrently via asyncio.gather to reduce total comparison latency.
 """
 
 import logging
@@ -19,6 +21,8 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/compare", tags=["compare"])
 
 
+# @risk-area: Synchronous sequential processing of two documents doubles pipeline latency; asyncio.gather would halve it.
+# #Business-Intent: Satisfies the challenge use case for comparing contracts with cosmetic vs. substantive diff classification.
 @router.post("/", response_model=ComparisonResult)
 @limiter.limit("10/minute")
 async def compare_two_documents(

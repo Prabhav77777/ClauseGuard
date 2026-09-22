@@ -1,3 +1,11 @@
+"""
+MODULE: Application entry point, FastAPI initialization, lifespan management, middleware, and background session cleanup.
+
+@level-one-validation: Central app entry point. Min-heap session cleanup and lifespan handlers are solid, but in-memory session store is single-process bound. Verified by test_api.py and test_security.py.
+
+#Scope-Of-Improvement: Migrate in-memory session dictionary and min-heap to Redis for distributed multi-worker production deployments.
+"""
+
 import asyncio
 import heapq
 import logging
@@ -25,12 +33,14 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# @risk-area: In-memory session store is lost on process restart and cannot be shared across multiple worker processes.
 # Session store & Efficiency min-heap for O(1) peek / O(log N) session expiration
 sessions: dict[str, Any] = {}
 sessions_heap: list[tuple[float, str]] = []  # tuple of (expiry_timestamp, session_id)
 sessions_lock = asyncio.Lock()
 
 
+# #What: Pushes a session entry into the min-heap ordered by expiry timestamp
 def push_session_expiry(session_id: str, last_accessed: float | None = None):
     """Push a session entry into the min-heap ordered by expiry timestamp."""
     ts = last_accessed if last_accessed is not None else time.time()
@@ -38,17 +48,7 @@ def push_session_expiry(session_id: str, last_accessed: float | None = None):
     heapq.heappush(sessions_heap, (expiry, session_id))
 
 
-def sync_sessions_heap():
-    """Synchronize any un-tracked sessions in sessions dict into the min-heap."""
-    heap_sids = {sid for _, sid in sessions_heap}
-    for sid, data in sessions.items():
-        if sid not in heap_sids:
-            last_accessed = time.time()
-            if isinstance(data, dict):
-                last_accessed = data.get("last_accessed", time.time())
-            push_session_expiry(sid, last_accessed)
-
-
+# #What: Background async loop purging expired sessions based on TTL
 async def cleanup_sessions():
     """Background task to clean up expired sessions using a min-heap."""
     while True:
@@ -56,7 +56,6 @@ async def cleanup_sessions():
             await asyncio.sleep(600)  # run every 10 minutes
             now = time.time()
             async with sessions_lock:
-                sync_sessions_heap()
                 expired_count = 0
                 while sessions_heap and sessions_heap[0][0] <= now:
                     expiry, sid = heapq.heappop(sessions_heap)
@@ -64,14 +63,14 @@ async def cleanup_sessions():
                     if data is None:
                         continue
 
-                    # Verify actual expiry timestamp in case session activity was updated
-                    last_accessed = now
-                    if isinstance(data, dict):
-                        last_accessed = data.get("last_accessed", now)
+                    # Verify actual expiry timestamp from DocumentSession instance
+                    last_accessed = getattr(data, "last_accessed", now) if not isinstance(data, dict) else data.get("last_accessed", now)
 
                     actual_expiry = last_accessed + settings.SESSION_TTL_SECONDS
                     if actual_expiry <= now:
                         del sessions[sid]
+                        if hasattr(app.state, "retrievers") and sid in app.state.retrievers:
+                            del app.state.retrievers[sid]
                         expired_count += 1
                     else:
                         # Session was refreshed; re-push updated expiry to heap
@@ -85,6 +84,7 @@ async def cleanup_sessions():
             logger.error(f"Error in session cleanup: {e}")
 
 
+# #What: Manages FastAPI lifecycle startup and cleanup tasks
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
@@ -140,7 +140,7 @@ app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)  # type: ignore[arg-type]
 
 
-# Security: Generic 500 error handler prevents stack trace and file path disclosure in production
+# #Business-Intent: Generic unhandled exception handler masks internal stack traces from client responses to satisfy production API security requirements.
 @app.exception_handler(Exception)
 async def unhandled_exception_handler(request: Request, exc: Exception):
     logger.error(f"Unhandled server error on {request.url.path}: {exc}", exc_info=True)

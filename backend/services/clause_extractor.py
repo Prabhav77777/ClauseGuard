@@ -1,13 +1,9 @@
-"""Clause extraction orchestration service.
+"""
+MODULE: Clause extraction pipeline orchestration service.
 
-Coordinates the full document processing pipeline:
-1. Parse document into pages
-2. Classify document type & extract clauses concurrently
-3. Categorize clauses & generate plain-language explanations concurrently
+@level-one-validation: Orchestrates parsing, parallel classification, clause extraction, categorization, and plain-English explanation via asyncio.gather. Tested in test_performance.py and test_e2e_integration.py.
 
-Efficiency Optimization:
-- Uses asyncio.gather for non-dependent LLM pipeline steps, cutting overall pipeline latency by ~50%.
-- Output of each step is cached in the session for all downstream operations (Q&A, scenario, brief).
+#Scope-Of-Improvement: Add pipeline status callback parameter to report progress percentages to real-time WebSockets.
 """
 
 import asyncio
@@ -22,6 +18,8 @@ from backend.services.document_parser import parse_document
 logger = logging.getLogger(__name__)
 
 
+# #What: Orchestrates full document pipeline with parallel LLM execution via asyncio.gather
+# #Business-Intent: Runs parallel LLM API calls reducing total upload pipeline processing latency by ~50%.
 async def process_document(
     file_bytes: bytes, file_type: str
 ) -> tuple[list[PageText], list[Clause], ClassificationResult]:

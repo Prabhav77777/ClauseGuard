@@ -1,14 +1,9 @@
-"""TF-IDF based clause retrieval for evidence-grounded Q&A.
+"""
+MODULE: TF-IDF vectorizer and cosine similarity clause retrieval engine.
 
-Uses scikit-learn's TF-IDF vectorizer and cosine similarity to find the
-most relevant clauses for a given question. This is computed in-memory
-with no external vector database needed.
+@level-one-validation: In-memory TF-IDF matrix built once per upload session. Sub-millisecond cosine similarity scoring with argpartition selection. Tested extensively in test_qa_grounding.py and test_performance.py.
 
-Efficiency:
-- The TF-IDF matrix is computed once per document session and cached.
-- Query result caching (LRU in-memory dict) prevents duplicate matrix multiplications.
-- O(N) argpartition selection instead of O(N log N) sorting.
-- Zero external API costs for retrieval.
+#Scope-Of-Improvement: Add hybrid BM25 + dense embedding re-ranking if semantically complex queries exhibit keyword mismatch.
 """
 
 import numpy as np
@@ -18,6 +13,7 @@ from sklearn.metrics.pairwise import cosine_similarity
 from backend.models.schemas import Clause
 
 
+# @risk-area: TF-IDF relies on exact term matching; queries with heavy synonyms or domain paraphrase without keyword overlap may return lower similarity scores.
 class ClauseRetriever:
     """Retrieves the most relevant clauses for a given question.
 
@@ -50,6 +46,8 @@ class ClauseRetriever:
         )
         self._tfidf_matrix = self._vectorizer.fit_transform(self._clause_texts)
 
+    # #What: Performs TF-IDF cosine similarity search over session clauses returning top-k relevant items
+    # #Business-Intent: Implements retrieval-first context filtering so LLM receives only relevant clauses, drastically cutting token cost and response latency.
     def retrieve(self, query: str, top_k: int = 5) -> list[Clause]:
         """Find the top-k most relevant clauses for a query.
 
@@ -95,6 +93,7 @@ class ClauseRetriever:
         self._query_cache[cache_key] = result
         return result
 
+    # #What: Over-fetches clauses and caps per-category count to enforce structural diversity for scenario reasoning
     def retrieve_by_categories(self, query: str, top_k: int = 5) -> list[Clause]:
         """Retrieve clauses across multiple categories for scenario analysis.
 

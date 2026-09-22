@@ -1,15 +1,9 @@
-"""Legal analysis orchestration service.
+"""
+MODULE: Legal analysis orchestration service (Q&A and scenario analysis).
 
-Coordinates Q&A and scenario analysis flows:
-1. Retrieve relevant clauses (never the full document)
-2. Check LLM response LRU/TTL cache
-3. Call the appropriate prompt module on cache miss
-4. Run final response validation
-5. Return validated response
+@level-one-validation: Orchestrates retrieval-first Q&A and scenario analysis with TTLCache deduplication and final validation guards. Tested in test_performance.py and test_qa_grounding.py.
 
-Efficiency:
-- Only top-k relevant clauses are sent to LLM prompts, never full document text.
-- In-memory TTLCache trades an O(1) hash table lookup against a full 1-2 second LLM round trip, preventing duplicate API calls.
+#Scope-Of-Improvement: Add thread-safe locking to TTLCache instances if high concurrency causes cache state mutation contention.
 """
 
 import logging
@@ -30,6 +24,8 @@ _LLM_RESPONSE_CACHE: TTLCache[tuple[str, tuple[str, ...]], QAResponse] = TTLCach
 _SCENARIO_CACHE: TTLCache[tuple[str, tuple[str, ...]], ScenarioResponse] = TTLCache(maxsize=500, ttl=1800)
 
 
+# #What: Orchestrates evidence-grounded Q&A with top-k TF-IDF retrieval, TTLCache deduplication, and final validation guard
+# #Business-Intent: Ensures answers use retrieval-first context (never full contract) to optimize token costs and enforce exact clause citations.
 async def ask_question_about_document(
     question: str,
     clauses: list[Clause],
@@ -61,6 +57,7 @@ async def ask_question_about_document(
     return response
 
 
+# #What: Orchestrates scenario analysis with cross-category clause retrieval and response caching
 async def analyze_scenario_for_document(
     scenario: str,
     clauses: list[Clause],

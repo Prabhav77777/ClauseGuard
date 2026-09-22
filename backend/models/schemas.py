@@ -1,17 +1,21 @@
-"""Pydantic schemas for all structured I/O in ClauseGuard.
+"""
+MODULE: Central Pydantic schemas and Enum taxonomies for structured LLM inputs/outputs and API responses.
 
-Every LLM response and API request/response is validated against these schemas
-before being processed or returned to the frontend.
+@level-one-validation: Schemas strictly enforce runtime data types and Pydantic field constraints across all backend layers. Tested extensively in test_extraction.py, test_qa_grounding.py, and test_comparison.py.
+
+#Scope-Of-Improvement: Add custom Pydantic validators to enforce non-empty whitespace checking on verbatim clause strings.
 """
 
 from __future__ import annotations
 
+import time
 from enum import Enum
 from typing import Optional
 
 from pydantic import BaseModel, Field
 
 
+# #Business-Intent: Fixed 15-category taxonomy ensuring deterministic categorization without hallucinated category strings.
 class ClauseCategory(str, Enum):
     """Fixed taxonomy for clause categorization. LLM must select from this enum only."""
     COMPENSATION = "compensation"
@@ -41,6 +45,7 @@ class DocumentType(str, Enum):
     UNKNOWN = "unknown"
 
 
+# #Business-Intent: Enforces strict three-way certainty distinction (stated/interpreted/not_established) to prevent AI legal conclusions.
 class CertaintyLevel(str, Enum):
     """Three-way certainty distinction for QA responses.
 
@@ -175,6 +180,7 @@ class FinalValidationResult(BaseModel):
 
 # --- Session State ---
 
+# #Business-Intent: Defines DocumentSession state schema including last_accessed timestamp for O(1) heap expiry.
 class DocumentSession(BaseModel):
     """In-memory session state for a processed document."""
     session_id: str = Field(..., description="Unique session identifier")
@@ -184,6 +190,7 @@ class DocumentSession(BaseModel):
     raw_pages: list[PageText] = Field(default_factory=list, description="Page-indexed raw text")
     unclear_items: list[str] = Field(default_factory=list, description="Accumulated unclear items for lawyer brief")
     lawyer_questions: list[str] = Field(default_factory=list, description="Accumulated lawyer questions")
+    last_accessed: float = Field(default_factory=time.time, description="Timestamp of last activity in seconds")
 
 
 # --- API Request/Response ---

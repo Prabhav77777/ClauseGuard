@@ -1,15 +1,19 @@
-"""Document upload and management endpoints.
+"""
+MODULE: Document upload and management FastAPI router.
 
-Handles file upload with validation, triggers the full processing pipeline
-(parse -> extract -> categorize -> explain), and provides access to
-processed clause data.
+@level-one-validation: Document upload endpoint handles magic-byte validation, content-hash caching, session creation, and error translation cleanly. Tested in test_api.py and test_performance.py.
+
+#Scope-Of-Improvement: Support multipart chunked upload streams for very large files exceeding typical HTTP body buffers.
 """
 
+import asyncio
 import hashlib
 import logging
+import time
 import uuid
 from typing import Any
 
+import cachetools
 from fastapi import APIRouter, File, HTTPException, Request, UploadFile, status
 from fastapi.responses import PlainTextResponse
 
@@ -24,10 +28,13 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/documents", tags=["documents"])
 
-# Efficiency: In-memory content hash cache to avoid re-parsing & re-processing identical files
-_DOCUMENT_CONTENT_CACHE: dict[str, dict[str, Any]] = {}
+# @risk-area: In-memory content hash cache uses LRUCache(maxsize=50) with asyncio.Lock; if worker scales horizontally across multiple processes, cache needs a shared backend like Redis.
+# Efficiency: Bounded in-memory content hash cache with lock to avoid re-parsing & re-processing identical files concurrently
+_DOCUMENT_CONTENT_CACHE: cachetools.LRUCache[str, dict[str, Any]] = cachetools.LRUCache(maxsize=50)
+_content_cache_lock = asyncio.Lock()
 
 
+# #What: Safely retrieves sessions dictionary from request application state
 def _get_sessions(request: Request) -> dict[str, Any]:
     """Access the in-memory session store from app state safely."""
     if not hasattr(request.app.state, "sessions"):
@@ -36,6 +43,7 @@ def _get_sessions(request: Request) -> dict[str, Any]:
     return sessions_dict
 
 
+# #What: Safely retrieves retrievers dictionary from request application state
 def _get_retrievers(request: Request) -> dict[str, Any]:
     """Access the retriever cache from app state safely."""
     if not hasattr(request.app.state, "retrievers"):
@@ -44,6 +52,7 @@ def _get_retrievers(request: Request) -> dict[str, Any]:
     return retrievers_dict
 
 
+# #Business-Intent: Document upload endpoint validates binary format, triggers parallel extraction pipeline, and issues a session ID.
 @router.post("/upload", response_model=UploadResponse)
 @limiter.limit("10/minute")
 async def upload_document(request: Request, file: UploadFile = File(...)):
@@ -70,23 +79,24 @@ async def upload_document(request: Request, file: UploadFile = File(...)):
         # Efficiency: Compute SHA-256 hash to check if this exact file was already processed
         content_hash = hashlib.sha256(file_bytes).hexdigest()
 
-        if content_hash in _DOCUMENT_CONTENT_CACHE:
-            logger.info(f"Efficiency: Content-hash cache hit for SHA256 {content_hash[:8]}")
-            cached = _DOCUMENT_CONTENT_CACHE[content_hash]
-            pages = cached["pages"]
-            clauses = cached["clauses"]
-            classification = cached["classification"]
-            retriever = cached["retriever"]
-        else:
-            # Run the full processing pipeline
-            pages, clauses, classification = await process_document(file_bytes, file_type)
-            retriever = ClauseRetriever(clauses)
-            _DOCUMENT_CONTENT_CACHE[content_hash] = {
-                "pages": pages,
-                "clauses": clauses,
-                "classification": classification,
-                "retriever": retriever,
-            }
+        async with _content_cache_lock:
+            if content_hash in _DOCUMENT_CONTENT_CACHE:
+                logger.info(f"Efficiency: Content-hash cache hit for SHA256 {content_hash[:8]}")
+                cached = _DOCUMENT_CONTENT_CACHE[content_hash]
+                pages = cached["pages"]
+                clauses = cached["clauses"]
+                classification = cached["classification"]
+                retriever = cached["retriever"]
+            else:
+                # Run the full processing pipeline
+                pages, clauses, classification = await process_document(file_bytes, file_type)
+                retriever = ClauseRetriever(clauses)
+                _DOCUMENT_CONTENT_CACHE[content_hash] = {
+                    "pages": pages,
+                    "clauses": clauses,
+                    "classification": classification,
+                    "retriever": retriever,
+                }
 
         # Create session (always issue a unique session_id for independent session lifecycle)
         session_id = str(uuid.uuid4())
@@ -101,6 +111,9 @@ async def upload_document(request: Request, file: UploadFile = File(...)):
         # Store session and build retriever
         sessions = _get_sessions(request)
         sessions[session_id] = session
+
+        from backend.main import push_session_expiry
+        push_session_expiry(session_id, session.last_accessed)
 
         retrievers = _get_retrievers(request)
         retrievers[session_id] = retriever
@@ -125,6 +138,7 @@ async def upload_document(request: Request, file: UploadFile = File(...)):
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Gemini API key is invalid or missing. Please set GEMINI_API_KEY in your .env file."
             )
+        # #Business-Intent: Route-specific 500 detail specifies document processing context for upload caller, intentionally distinct from main.py's global fallback
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="An internal server error occurred while processing the document."
@@ -133,6 +147,7 @@ async def upload_document(request: Request, file: UploadFile = File(...)):
         await file.close()
 
 
+# #What: Returns all extracted clauses for a given session ID
 @router.get("/{session_id}/clauses", response_model=list[Clause])
 async def get_clauses(session_id: str, request: Request):
     """Get all clauses for a session."""
@@ -143,9 +158,11 @@ async def get_clauses(session_id: str, request: Request):
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Session not found. Please upload a document first."
         )
+    session.last_accessed = time.time()
     return session.clauses
 
 
+# #What: Returns a single clause by ID from session state
 @router.get("/{session_id}/clauses/{clause_id}", response_model=Clause)
 async def get_clause(session_id: str, clause_id: str, request: Request):
     """Get a specific clause by ID."""
@@ -156,6 +173,7 @@ async def get_clause(session_id: str, clause_id: str, request: Request):
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Session not found"
         )
+    session.last_accessed = time.time()
 
     for clause in session.clauses:
         if clause.id == clause_id:
@@ -166,6 +184,8 @@ async def get_clause(session_id: str, clause_id: str, request: Request):
         detail=f"Clause '{clause_id}' not found"
     )
 
+
+# #Business-Intent: Compiles accumulated user questions and unclear items into an exportable Markdown Lawyer Brief satisfy legal professional preparation use case.
 @router.get("/{session_id}/brief")
 async def get_lawyer_brief(session_id: str, request: Request):
     """Generate and return the Lawyer Prep Brief as markdown."""
@@ -176,5 +196,6 @@ async def get_lawyer_brief(session_id: str, request: Request):
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Session not found"
         )
+    session.last_accessed = time.time()
     brief_md = generate_brief(session)
     return PlainTextResponse(content=brief_md, media_type="text/markdown")

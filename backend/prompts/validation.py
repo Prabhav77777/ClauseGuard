@@ -1,8 +1,9 @@
-"""Response validation prompts — uncertainty check and final guard.
+"""
+MODULE: Response validation guard and uncertainty verification prompts.
 
-This module implements two validation steps:
-1. Uncertainty validation: Binary check on whether an answer is supported by sources
-2. Final response validation: Comprehensive guard that downgrades unsupported claims
+@level-one-validation: Performs final validation on Q&A and scenario responses. Strips system prompt leaks, validates cited clause IDs exist, and downgrades unverified claims to NOT_ESTABLISHED. Tested in test_qa_grounding.py.
+
+#Scope-Of-Improvement: Log validation failure metrics to monitor LLM citation accuracy over time.
 """
 
 import logging
@@ -26,6 +27,8 @@ from backend.security.prompt_guard import (
 logger = logging.getLogger(__name__)
 
 
+# @risk-area: Synchronous validation check adds an additional LLM API call latency overhead.
+# #What: Performs binary verification check on whether answer claims are supported by source clause text
 async def validate_uncertainty(
     answer_text: str, source_clauses: list[Clause]
 ) -> ValidationResult:
@@ -61,6 +64,8 @@ Set is_supported to false if the answer contains fabricated information, unsuppo
         return ValidationResult(is_supported=False, notes="Validation could not be completed.")
 
 
+# #What: Validates cited clause IDs, strips prompt leaks, and downgrades unverified claims
+# #Business-Intent: Acts as final security and quality guard ensuring no fabricated citations or leaked prompt text reach the user.
 def validate_final_response(
     response: QAResponse | ScenarioResponse,
     all_clauses: list[Clause]

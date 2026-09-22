@@ -1,8 +1,9 @@
-"""Application configuration loaded from environment variables.
+"""
+MODULE: Central application configuration via pydantic-settings.
 
-All settings are loaded via pydantic-settings from .env or environment variables.
-No secrets are ever hardcoded. The API key is validated at startup when needed,
-not during module import, to allow tests to run without a key.
+@level-one-validation: Configuration loading is clean and safely masks API keys in string repr. However, lru_cache on get_settings() prevents dynamic reloads if environment variables change during process lifecycle. Tested in test_security.py.
+
+#Scope-Of-Improvement: Add settings refresh method to allow live environment configuration reloads in containerized deployments.
 """
 
 import os
@@ -11,6 +12,7 @@ from functools import lru_cache
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
+# #Business-Intent: Centralizes environment configuration so API keys and document limits are never hardcoded.
 class Settings(BaseSettings):
     """ClauseGuard application settings.
 
@@ -60,6 +62,7 @@ class Settings(BaseSettings):
         if not self.GEMINI_API_KEY:
             self.GEMINI_API_KEY = os.environ.get("GOOGLE_API_KEY", "")
 
+    # #What: Formats safe string representation masking secret API keys
     def __repr__(self) -> str:
         masked_key = "***" if self.GEMINI_API_KEY else ""
         return (
@@ -72,6 +75,8 @@ class Settings(BaseSettings):
         return self.__repr__()
 
 
+# @risk-area: Statically cached settings via lru_cache cannot reflect runtime env changes without process restart.
+# #What: Retrieves cached singleton instance of application settings
 @lru_cache()
 def get_settings() -> Settings:
     """Retrieve cached application settings instance.

@@ -1,7 +1,9 @@
-"""Clause categorization prompt.
+"""
+MODULE: Clause categorization prompt orchestration.
 
-Assigns each clause to a category from the fixed taxonomy. Processes
-all clauses in a single batch to minimize API calls.
+@level-one-validation: Batch categorizes clauses using structured JSON response schema. Fallback assigns GENERAL category on LLM failure. Tested in test_extraction.py.
+
+#Scope-Of-Improvement: Split very large clause sets (>100 clauses) into multiple sub-batches to prevent hitting prompt output token limits.
 """
 
 import logging
@@ -18,6 +20,8 @@ from backend.security.prompt_guard import get_data_boundary_instruction, wrap_do
 logger = logging.getLogger(__name__)
 
 
+# #Uncertain: Single-batch LLM categorization may hit output token limits if document contains >100 clauses.
+# #Business-Intent: Categorizes clauses into fixed 15-category taxonomy to highlight obligations, liabilities, and restrictions.
 async def categorize_clauses(clauses: list[Clause]) -> list[CategorizationResult]:
     """Assign categories to all clauses from the fixed taxonomy.
 
