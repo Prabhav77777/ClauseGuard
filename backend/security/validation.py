@@ -21,7 +21,7 @@ def validate_file_size(file_bytes: bytes) -> None:
     max_bytes = settings.MAX_FILE_SIZE_MB * 1024 * 1024
     if len(file_bytes) > max_bytes:
         raise HTTPException(
-            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            status_code=status.HTTP_413_CONTENT_TOO_LARGE,
             detail=f"File exceeds maximum size of {settings.MAX_FILE_SIZE_MB}MB"
         )
 
