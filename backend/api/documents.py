@@ -22,12 +22,16 @@ router = APIRouter(prefix="/api/documents", tags=["documents"])
 
 
 def _get_sessions(request: Request) -> dict:
-    """Access the in-memory session store from app state."""
+    """Access the in-memory session store from app state safely."""
+    if not hasattr(request.app.state, "sessions"):
+        request.app.state.sessions = {}
     return request.app.state.sessions
 
 
 def _get_retrievers(request: Request) -> dict:
-    """Access the retriever cache from app state."""
+    """Access the retriever cache from app state safely."""
+    if not hasattr(request.app.state, "retrievers"):
+        request.app.state.retrievers = {}
     return request.app.state.retrievers
 
 

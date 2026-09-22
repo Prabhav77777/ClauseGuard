@@ -70,5 +70,17 @@ class Settings(BaseSettings):
         return self.__repr__()
 
 
+from functools import lru_cache
+
+
+@lru_cache()
+def get_settings() -> Settings:
+    """Retrieve cached application settings instance.
+    
+    Efficiency: @lru_cache guarantees settings are read from environment once.
+    """
+    return Settings()
+
+
 # Module-level singleton — loaded once at import time
-settings = Settings()
+settings = get_settings()

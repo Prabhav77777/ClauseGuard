@@ -18,6 +18,8 @@ router = APIRouter(prefix="/api/chat", tags=["chat"])
 
 def _get_session(session_id: str, request: Request):
     """Retrieve session or raise 404."""
+    if not hasattr(request.app.state, "sessions"):
+        request.app.state.sessions = {}
     sessions = request.app.state.sessions
     session = sessions.get(session_id)
     if not session:
@@ -30,6 +32,8 @@ def _get_session(session_id: str, request: Request):
 
 def _get_retriever(session_id: str, request: Request):
     """Retrieve the clause retriever for a session."""
+    if not hasattr(request.app.state, "retrievers"):
+        request.app.state.retrievers = {}
     retrievers = request.app.state.retrievers
     retriever = retrievers.get(session_id)
     if not retriever:

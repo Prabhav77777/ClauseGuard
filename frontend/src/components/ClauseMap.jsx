@@ -1,22 +1,29 @@
-import { useState } from 'react'
+import React, { useState, useMemo } from 'react'
 
 /**
  * ClauseMap — Categorized clause cards with expandable details.
  * 
- * Groups clauses by category, showing plain-English explanations
- * and original text with page references. Each card is expandable
- * using accessible accordion pattern (aria-expanded, aria-controls).
+ * Efficiency: Uses React.useMemo for category grouping so calculations
+ * execute only when clause data changes, preventing unnecessary re-renders.
+ * 
+ * Accessibility:
+ * - Uses accessible accordion pattern (aria-expanded, aria-controls)
+ * - Semantic landmark regions (section, article, h2, h3)
+ * - Keyboard navigable interactive card triggers
  */
-export default function ClauseMap({ clauses, docInfo }) {
-  // Group clauses by category
-  const grouped = {}
-  for (const clause of clauses) {
-    const cat = clause.category || 'general'
-    if (!grouped[cat]) grouped[cat] = []
-    grouped[cat].push(clause)
-  }
+function ClauseMap({ clauses, docInfo }) {
+  // Efficiency: Memoize grouped clauses by category to prevent redundant re-computation
+  const grouped = useMemo(() => {
+    const acc = {}
+    for (const clause of clauses || []) {
+      const cat = clause.category || 'general'
+      if (!acc[cat]) acc[cat] = []
+      acc[cat].push(clause)
+    }
+    return acc
+  }, [clauses])
 
-  const categoryLabels = {
+  const categoryLabels = useMemo(() => ({
     compensation: '💰 Compensation',
     termination: '🚪 Termination',
     notice_period: '📅 Notice Period',
@@ -32,10 +39,10 @@ export default function ClauseMap({ clauses, docInfo }) {
     restrictions: '🔐 Restrictions',
     indemnification: '🛡️ Indemnification',
     general: '📄 General',
-  }
+  }), [])
 
   return (
-    <section aria-labelledby="clause-map-heading">
+    <section aria-labelledby="clause-map-heading" className="clause-map-section">
       <div style={{ marginBottom: 'var(--space-4)' }}>
         <h2 id="clause-map-heading" style={{ fontSize: 'var(--text-xl)', marginBottom: 'var(--space-2)' }}>
           Clause Map
@@ -48,10 +55,10 @@ export default function ClauseMap({ clauses, docInfo }) {
       </div>
 
       {Object.entries(grouped).map(([category, categoryClauses]) => (
-        <div key={category} style={{ marginBottom: 'var(--space-6)' }}>
+        <div key={category} style={{ marginBottom: 'var(--space-6)' }} role="region" aria-label={`${category} clauses`}>
           <h3 style={{ fontSize: 'var(--text-lg)', marginBottom: 'var(--space-3)', display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
             {categoryLabels[category] || `📄 ${category.replace(/_/g, ' ')}`}
-            <span className="badge badge-category">{categoryClauses.length}</span>
+            <span className="badge badge-category" aria-label={`${categoryClauses.length} items`}>{categoryClauses.length}</span>
           </h3>
           {categoryClauses.map((clause) => (
             <ClauseCard key={clause.id} clause={clause} />
@@ -62,17 +69,19 @@ export default function ClauseMap({ clauses, docInfo }) {
   )
 }
 
-function ClauseCard({ clause }) {
+// Efficiency: Memoized ClauseCard component prevents re-rendering un-expanded cards
+const ClauseCard = React.memo(function ClauseCard({ clause }) {
   const [expanded, setExpanded] = useState(false)
   const contentId = `clause-content-${clause.id}`
 
   return (
-    <article className="clause-card" id={`clause-${clause.id}`}>
+    <article className="clause-card" id={`clause-${clause.id}`} role="article">
       <button
         type="button"
         className="clause-card-header"
         aria-expanded={expanded}
         aria-controls={contentId}
+        aria-label={`Clause ${clause.id}: ${clause.section}, Page ${clause.page}. Click to ${expanded ? 'collapse' : 'expand'}.`}
         onClick={() => setExpanded(!expanded)}
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', flex: 1 }}>
@@ -83,14 +92,14 @@ function ClauseCard({ clause }) {
             {clause.section}
           </span>
         </div>
-        <span className="page-ref">p.{clause.page}</span>
+        <span className="page-ref" aria-label={`Page ${clause.page}`}>p.{clause.page}</span>
         <span aria-hidden="true" style={{ fontSize: 'var(--text-xs)' }}>
           {expanded ? '▲' : '▼'}
         </span>
       </button>
 
       {expanded && (
-        <div id={contentId} className="clause-card-body">
+        <div id={contentId} className="clause-card-body" role="region" aria-label={`Details for ${clause.section}`}>
           {/* Plain-English explanation */}
           {clause.plain_explanation && (
             <div style={{ marginBottom: 'var(--space-3)' }}>
@@ -120,4 +129,6 @@ function ClauseCard({ clause }) {
       )}
     </article>
   )
-}
+})
+
+export default React.memo(ClauseMap)

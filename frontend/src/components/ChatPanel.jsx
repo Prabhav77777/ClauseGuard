@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react'
+import React, { useState, useRef, useEffect, useCallback } from 'react'
 import { API_BASE } from '../apiConfig'
 
 /**
@@ -9,12 +9,13 @@ import { API_BASE } from '../apiConfig'
  * - Source clause citations (clickable to scroll to clause)
  * - Certainty badges with icon + text (never color alone)
  * 
+ * Efficiency: Uses useCallback and React.memo to minimize re-render latency.
+ * 
  * Accessibility:
  * - role="log" with aria-live for screen reader announcements
- * - Keyboard navigable input and buttons
- * - Focus management on new messages
+ * - Focus management on message submission
  */
-export default function ChatPanel({ sessionId, clauses }) {
+function ChatPanel({ sessionId, clauses }) {
   const [messages, setMessages] = useState([{
     id: 'welcome',
     sender: 'assistant',
@@ -29,12 +30,11 @@ export default function ChatPanel({ sessionId, clauses }) {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages])
 
-  const sendQuestion = async (e) => {
+  const sendQuestion = useCallback(async (e) => {
     e.preventDefault()
     const question = input.trim()
     if (!question || isLoading) return
 
-    // Add user message
     const userMsg = { id: `user-${Date.now()}`, sender: 'user', text: question }
     setMessages(prev => [...prev, userMsg])
     setInput('')
@@ -71,17 +71,16 @@ export default function ChatPanel({ sessionId, clauses }) {
       setIsLoading(false)
       inputRef.current?.focus()
     }
-  }
+  }, [input, isLoading, sessionId])
 
-  const scrollToClause = (clauseId) => {
+  const scrollToClause = useCallback((clauseId) => {
     const el = document.getElementById(`clause-${clauseId}`)
     if (el) {
       el.scrollIntoView({ behavior: 'smooth', block: 'center' })
-      // Expand the clause card if it has a toggle button
       const btn = el.querySelector('button[aria-expanded="false"]')
       if (btn) btn.click()
     }
-  }
+  }, [])
 
   return (
     <section className="chat-panel" aria-labelledby="chat-heading">
@@ -99,10 +98,8 @@ export default function ChatPanel({ sessionId, clauses }) {
         aria-label="Conversation history"
       >
         {messages.map((msg) => (
-          <div key={msg.id} className={`message message-${msg.sender}`}>
+          <div key={msg.id} className={`message message-${msg.sender}`} role="article">
             <p>{msg.text}</p>
-            
-            {/* Three-way distinction for QA responses */}
             {msg.qaData && <ResponseDisplay data={msg.qaData} onCitationClick={scrollToClause} />}
           </div>
         ))}
@@ -110,7 +107,7 @@ export default function ChatPanel({ sessionId, clauses }) {
         {isLoading && (
           <div className="message message-assistant" role="status" aria-label="Analyzing your question">
             <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
-              <div className="spinner" />
+              <div className="spinner" aria-hidden="true" />
               <span>Analyzing relevant clauses...</span>
             </div>
           </div>
@@ -120,7 +117,7 @@ export default function ChatPanel({ sessionId, clauses }) {
       </div>
 
       {/* Input */}
-      <form className="chat-input-area" onSubmit={sendQuestion}>
+      <form className="chat-input-area" onSubmit={sendQuestion} role="search">
         <label htmlFor="chat-input" className="sr-only" style={{ position: 'absolute', width: '1px', height: '1px', overflow: 'hidden', clip: 'rect(0,0,0,0)' }}>
           Ask a question about the document
         </label>
@@ -133,8 +130,9 @@ export default function ChatPanel({ sessionId, clauses }) {
           placeholder="Ask about your contract..."
           disabled={isLoading}
           autoComplete="off"
+          aria-label="Ask a question about the contract"
         />
-        <button type="submit" disabled={isLoading || !input.trim()}>
+        <button type="submit" disabled={isLoading || !input.trim()} aria-label="Send question">
           Send
         </button>
       </form>
@@ -144,11 +142,9 @@ export default function ChatPanel({ sessionId, clauses }) {
 
 /**
  * ResponseDisplay — Renders the three-way distinction and citations.
- * 
- * Shows what the document states, what's interpreted, and what's
- * not established, with certainty badges and source citations.
+ * Efficiency: Memoized component.
  */
-function ResponseDisplay({ data, onCitationClick }) {
+const ResponseDisplay = React.memo(function ResponseDisplay({ data, onCitationClick }) {
   const certaintyConfig = {
     stated: { label: '✓ Stated in Document', className: 'badge-stated' },
     interpreted: { label: '◐ Interpretation', className: 'badge-interpreted' },
@@ -160,25 +156,25 @@ function ResponseDisplay({ data, onCitationClick }) {
   return (
     <div style={{ marginTop: 'var(--space-3)' }}>
       {/* Certainty badge */}
-      <span className={`badge ${config.className}`}>
+      <span className={`badge ${config.className}`} role="status">
         {config.label}
       </span>
 
       {/* Three-way distinction blocks */}
       {data.stated && (
-        <div className="distinction-block distinction-stated">
+        <div className="distinction-block distinction-stated" role="region" aria-label="What the document says">
           <strong>📗 What the document says:</strong>
           <p style={{ marginTop: 'var(--space-1)' }}>{data.stated}</p>
         </div>
       )}
       {data.interpreted && (
-        <div className="distinction-block distinction-interpreted">
+        <div className="distinction-block distinction-interpreted" role="region" aria-label="Interpretation">
           <strong>📙 Interpretation:</strong>
           <p style={{ marginTop: 'var(--space-1)' }}>{data.interpreted}</p>
         </div>
       )}
       {data.not_established && (
-        <div className="distinction-block distinction-not-established">
+        <div className="distinction-block distinction-not-established" role="region" aria-label="Not established">
           <strong>📕 Not established:</strong>
           <p style={{ marginTop: 'var(--space-1)' }}>{data.not_established}</p>
         </div>
@@ -196,6 +192,7 @@ function ResponseDisplay({ data, onCitationClick }) {
               className="citation"
               onClick={() => onCitationClick(id)}
               aria-label={`View source clause ${id}`}
+              type="button"
             >
               📍 {id}
             </button>
@@ -211,10 +208,12 @@ function ResponseDisplay({ data, onCitationClick }) {
           background: 'var(--color-info-light)',
           borderRadius: 'var(--radius)',
           fontSize: 'var(--text-sm)',
-        }}>
+        }} role="note" aria-label="Suggested lawyer question">
           <strong>💡 Ask your lawyer:</strong> {data.lawyer_question}
         </div>
       )}
     </div>
   )
-}
+})
+
+export default React.memo(ChatPanel)
