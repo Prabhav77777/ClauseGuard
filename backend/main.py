@@ -50,6 +50,8 @@ async def cleanup_sessions():
 async def lifespan(app: FastAPI):
     # Startup
     logger.info("Starting ClauseGuard API...")
+    app.state.sessions = {}
+    app.state.retrievers = {}
     cleanup_task = asyncio.create_task(cleanup_sessions())
     yield
     # Shutdown
@@ -83,21 +85,10 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 async def health_check():
     return {"status": "ok"}
 
-# Include routers dynamically to prevent import errors if they don't exist yet
-try:
-    from backend.api.documents import router as documents_router
-    app.include_router(documents_router, prefix="/api")
-except ImportError as e:
-    logger.warning(f"Could not import documents router: {e}")
+from backend.api.documents import router as documents_router
+from backend.api.chat import router as chat_router
+from backend.api.compare import router as compare_router
 
-try:
-    from backend.api.chat import router as chat_router
-    app.include_router(chat_router, prefix="/api")
-except ImportError as e:
-    logger.warning(f"Could not import chat router: {e}")
-
-try:
-    from backend.api.compare import router as compare_router
-    app.include_router(compare_router, prefix="/api")
-except ImportError as e:
-    logger.warning(f"Could not import compare router: {e}")
+app.include_router(documents_router)
+app.include_router(chat_router)
+app.include_router(compare_router)

@@ -1,0 +1,93 @@
+"""Q&A and scenario analysis chat endpoints.
+
+Provides evidence-grounded question answering and scenario simulation.
+All responses include citations, certainty tags, and three-way distinction
+(stated / interpreted / not_established).
+"""
+
+import logging
+from fastapi import APIRouter, HTTPException, Request, status
+
+from backend.models.schemas import AskRequest, QAResponse, ScenarioRequest, ScenarioResponse
+from backend.services.legal_analyzer import ask_question_about_document, analyze_scenario_for_document
+
+logger = logging.getLogger(__name__)
+
+router = APIRouter(prefix="/api/chat", tags=["chat"])
+
+
+def _get_session(session_id: str, request: Request):
+    """Retrieve session or raise 404."""
+    sessions = request.app.state.sessions
+    session = sessions.get(session_id)
+    if not session:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Session not found. Please upload a document first."
+        )
+    return session
+
+
+def _get_retriever(session_id: str, request: Request):
+    """Retrieve the clause retriever for a session."""
+    retrievers = request.app.state.retrievers
+    retriever = retrievers.get(session_id)
+    if not retriever:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Session retriever not found. Please upload a document first."
+        )
+    return retriever
+
+
+@router.post("/{session_id}/ask", response_model=QAResponse)
+async def ask_question(session_id: str, body: AskRequest, request: Request):
+    """Ask a question about the uploaded document.
+    
+    Uses retrieval-first approach: only top-k relevant clauses are sent
+    to the LLM, never the full document. Response includes citations
+    and three-way certainty distinction.
+    """
+    session = _get_session(session_id, request)
+    retriever = _get_retriever(session_id, request)
+    
+    response = await ask_question_about_document(
+        question=body.question,
+        clauses=session.clauses,
+        retriever=retriever,
+    )
+    
+    # Accumulate lawyer questions and unclear items for the prep brief
+    if response.lawyer_question:
+        session.lawyer_questions.append(response.lawyer_question)
+    if response.not_established:
+        session.unclear_items.append(response.not_established)
+    
+    logger.info(f"QA: session={session_id}, certainty={response.certainty}, sources={len(response.sources)}")
+    return response
+
+
+@router.post("/{session_id}/scenario", response_model=ScenarioResponse)
+async def analyze_scenario(session_id: str, body: ScenarioRequest, request: Request):
+    """Analyze a hypothetical scenario against the document.
+    
+    Uses cross-category retrieval to find relevant clauses from different
+    parts of the document for comprehensive scenario analysis.
+    """
+    session = _get_session(session_id, request)
+    retriever = _get_retriever(session_id, request)
+    
+    response = await analyze_scenario_for_document(
+        scenario=body.scenario,
+        clauses=session.clauses,
+        retriever=retriever,
+    )
+    
+    # Accumulate for prep brief
+    if response.lawyer_question:
+        session.lawyer_questions.append(response.lawyer_question)
+    if response.unclear:
+        session.unclear_items.append(response.unclear)
+    
+    logger.info(f"Scenario: session={session_id}, relevant_clauses={len(response.relevant_clauses)}")
+    return response

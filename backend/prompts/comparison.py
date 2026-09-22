@@ -1,0 +1,72 @@
+"""Two-document comparison prompt.
+
+Compares matched clause pairs from two documents, classifying changes
+as Added/Removed/Modified with materiality (cosmetic vs. substantive)
+and stated justification.
+"""
+
+import anthropic
+import logging
+from backend.config import settings
+from backend.models.schemas import Clause, ComparisonItem, ComparisonResult
+from backend.security.prompt_guard import wrap_document_content, get_data_boundary_instruction
+
+logger = logging.getLogger(__name__)
+
+
+async def compare_documents(
+    clauses_doc1: list[Clause], clauses_doc2: list[Clause]
+) -> ComparisonResult:
+    """Compare clauses between two documents.
+    
+    Identifies added, removed, and modified clauses with materiality
+    classification and justification.
+    """
+    doc1_text = "\n".join(
+        f"[DOC1 - {c.id}] {c.section}: {c.text}" for c in clauses_doc1
+    )
+    doc2_text = "\n".join(
+        f"[DOC2 - {c.id}] {c.section}: {c.text}" for c in clauses_doc2
+    )
+    
+    combined = f"DOCUMENT 1 CLAUSES:\n{doc1_text}\n\nDOCUMENT 2 CLAUSES:\n{doc2_text}"
+    wrapped_text, nonce = wrap_document_content(combined)
+    boundary_instruction = get_data_boundary_instruction(nonce)
+    
+    client = anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY)
+    
+    response = client.messages.create(
+        model=settings.CLAUDE_MODEL,
+        max_tokens=4096,
+        system=f"""You are a legal document comparison system. Compare clauses between two versions of a document.
+
+{boundary_instruction}
+
+For each difference found:
+1. 'status': 'Added' (in doc2 only), 'Removed' (in doc1 only), or 'Modified' (changed between versions)
+2. 'old': The original text from doc1 (null if Added)
+3. 'new': The new text from doc2 (null if Removed)
+4. 'materiality': 'cosmetic' (formatting, minor wording) or 'substantive' (changes meaning, obligations, rights)
+5. 'reason': A clear justification for the materiality classification
+
+Rules:
+1. Match clauses by their section/topic, not by position.
+2. Only report actual differences, not identical clauses.
+3. Materiality MUST include a stated justification.
+4. Be precise about what changed and why it matters.""",
+        tools=[{
+            "name": "compare",
+            "description": "Output document comparison results.",
+            "input_schema": ComparisonResult.model_json_schema()
+        }],
+        tool_choice={"type": "tool", "name": "compare"},
+        messages=[{"role": "user", "content": f"Compare these two documents:\n{wrapped_text}"}]
+    )
+    
+    for block in response.content:
+        if block.type == "tool_use":
+            result = ComparisonResult(**block.input)
+            logger.info(f"Comparison found {len(result.items)} differences")
+            return result
+    
+    return ComparisonResult(items=[])
