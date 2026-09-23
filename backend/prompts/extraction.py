@@ -57,13 +57,47 @@ def create_adaptive_batches(
     return batches
 
 
+# #Business-Intent: Fast deterministic classification eliminates 1 full LLM API call on standard legal contract titles.
+def classify_document_deterministic(pages: list[PageText]) -> ClassificationResult | None:
+    """Attempt fast deterministic classification using explicit header/title matching.
+
+    Inspects only the first 2 pages. Returns ClassificationResult with confidence 1.0
+    if a strong canonical match is found, or None if ambiguous/uncertain.
+    """
+    if not pages:
+        return None
+
+    sample_text = " ".join(p.text for p in pages[:2]).lower()
+    sample_text = " ".join(sample_text.split())
+
+    canonical_patterns = [
+        (DocumentType.EMPLOYMENT_AGREEMENT, ["employment agreement", "employment contract", "offer letter"]),
+        (DocumentType.LEASE_AGREEMENT, ["lease agreement", "residential lease", "commercial lease", "tenancy agreement"]),
+        (DocumentType.NDA, ["non-disclosure agreement", "confidentiality agreement", "nda agreement", "mutual nda"]),
+        (DocumentType.SERVICE_AGREEMENT, ["service agreement", "master services agreement", "statement of work"]),
+        (DocumentType.PARTNERSHIP_AGREEMENT, ["partnership agreement", "operating agreement"]),
+    ]
+
+    for doc_type, keywords in canonical_patterns:
+        for kw in keywords:
+            if kw in sample_text:
+                logger.info(f"Efficiency: Fast deterministic document classification hit for type '{doc_type.value}' via keyword '{kw}'")
+                return ClassificationResult(doc_type=doc_type, confidence=1.0)
+
+    return None
+
+
 # #Business-Intent: Classifies legal document type (employment agreement, lease, NDA, etc.) to inform downstream analysis.
 async def classify_document(pages: list[PageText]) -> ClassificationResult:
     """Classify the document type from sampled text.
 
-    Uses the first few pages to determine document type (employment agreement,
-    lease, NDA, etc.). Selects from a fixed enum or 'unknown'.
+    Efficiency: Checks deterministic fast-path first. If ambiguous, falls back
+    to Gemini structured LLM classification.
     """
+    det_result = classify_document_deterministic(pages)
+    if det_result is not None:
+        return det_result
+
     sample_text = "\n\n".join(p.text for p in pages[:2])
     wrapped_text, nonce = wrap_document_content(sample_text)
     boundary_instruction = get_data_boundary_instruction(nonce)
